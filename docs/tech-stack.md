@@ -1,0 +1,162 @@
+# Tech stack
+
+Proposed, last updated 2026-10-17. Open items are tagged **(Qn)**; see [spec.md › Open questions](spec.md#open-questions).
+
+## Summary
+
+One TypeScript web codebase, shipped two ways:
+
+- **Web**: installable PWA that works offline.
+- **Desktop**: Tauri 2 apps for Windows, macOS and Linux.
+- **Mobile**: the responsive web app in v1; Tauri 2 iOS/Android apps in phase 2.
+- **Sync**: cards sync across devices in v1 through our own sync server on Cloudflare Workers, using TinyBase.
+
+## Stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Desktop shell | Tauri 2 | Small installers (~5–10 MB), low memory, fast startup. First-party plugins for tray, global shortcuts, notifications, single instance, updater. Can target iOS/Android later. |
+| UI framework | Svelte 5 | Fine-grained reactivity: a ticking digit updates one text node, not a component tree. Built-in transitions and `animate:flip` for adding, removing and reordering cards. |
+| Language / build | TypeScript 6.0 (strict), Vite 8 | TypeScript stays on 6.x until typescript-eslint supports the native TypeScript 7 compiler. |
+| Package manager | pnpm 12 | Pinned through `packageManager` in `package.json`. |
+| Lint / format | ESLint 10 (flat config, typescript-eslint, eslint-plugin-svelte), Prettier | |
+| Styling | Plain CSS, custom properties as design tokens, container queries | Runtime theming is a variable swap with no re-render. Each card scales from its own container size, phone to 4K. |
+| Color | `@material/material-color-utilities` | Builds Material 3 light and dark palettes from one seed color, with valid contrast. |
+| Icons | Material Symbols (SVG, Apache 2.0) | Matches the card design. |
+| Font | Variable font (Roboto Flex or Inter), self-hosted | Variable weight makes a font-weight setting cheap. Digits use `tabular-nums`. |
+| i18n | Paraglide JS + `Intl` | Compiled, type-safe, tree-shaken messages. `Intl` handles times, numbers and plurals per locale. |
+| Keyboard | Own keymap layer (may use `tinykeys`) | Every shortcut is rebindable and stored in settings. |
+| Data store | TinyBase, persisted to IndexedDB | Two stores: a synced `MergeableStore` (cards, behavior settings) and a device-only store (appearance). IndexedDB works in the browser and in the Tauri webview. |
+| Schemas | Valibot with versioned migrations | Validates settings and imported data. |
+| Sync | TinyBase `MergeableStore` over WebSocket | Per-field newest-wins merge with hybrid logical clocks. The local store stays the source of truth. |
+| Server | Cloudflare Workers + Durable Objects | One Durable Object per user holds their store in its built-in SQLite. Idle connections hibernate and cost nothing. See [Server](#server). |
+| Auth | Better Auth on D1 (Drizzle or Kysely adapter) | Runs in our Worker: email code, Google, Apple, GitHub. |
+| Email | Resend | Sends sign-in codes; called from the Worker with `fetch`. |
+| Offline / install | `vite-plugin-pwa` (Workbox) | |
+| Unit tests | Vitest with fake timers | Timer engine, digit-entry parser, migrations. |
+| E2E tests | Playwright | Keyboard flows, light/dark visual snapshots, responsive breakpoints. |
+| CI / release | GitHub Actions + `tauri-action` | Builds and signs for all three desktop OSes. |
+
+## Alternatives considered
+
+| Option | Verdict |
+|---|---|
+| Electron | Same Chromium on every OS, but ~100 MB+ installers and high memory for a timer. Fallback if Linux WebKitGTK performance becomes a blocker. |
+| Flutter | Strong animation and native mobile, but its web build renders to a canvas: slow first load, weaker text input and accessibility. Web is a primary target. |
+| React | Works, but per-frame updates must bypass React through refs. |
+| SolidJS | Same performance model as Svelte with JSX syntax; smaller ecosystem. |
+| PWA only | Simplest, but no tray, global hotkeys, reliable background alarms, or always-on-top outside Chromium. |
+
+## Sync engine options
+
+Researched 2026-10-17 for a self-hosted server. Needs: offline writes, realtime, per-field last-writer-wins, a tiny dataset, a TypeScript client.
+
+How local-first sync works: each device keeps the full data locally and the UI only touches that copy. Every change gets a hybrid logical clock stamp. Devices exchange changes through a sync server over a WebSocket, and for each field the newest stamp wins, so every device converges on the same result in any arrival order. The server is needed because devices are rarely online at the same time; it stores and relays.
+
+| Engine | Server we'd run | License | Offline writes | Auth | Notes |
+|---|---|---|---|---|---|
+| TinyBase | Node process + SQLite or Postgres | MIT | Yes | No | **Chosen.** MergeableStore is per-cell last-writer-wins with HLC stamps. Tiny client. Has a Cloudflare Durable Object server and SQLite persister. |
+| Jazz | `jazz-run sync` (Node) + SQLite | MIT | Yes | Built in | Own CRDT data model. Identity is a local secret that needs backup. |
+| InstantDB | JVM server + Postgres + email provider | Apache 2.0 | Yes | Built in | Heavy for our data; their VPS guide estimates ~$30/month. |
+| Triplit | Node server | AGPL-3.0 | Yes | No | Last release July 2025. |
+| Zero | Postgres + zero-cache + API server | not checked | **No** | No | Ruled out: no offline writes. |
+| PowerSync Open Edition | Service + Postgres/MongoDB/MySQL + API | FSL server, Apache 2.0 clients | Yes | No | Ships SQLite (wasm) to the browser. |
+| ElectricSQL | Elixir service + Postgres | Apache 2.0 | Build it ourselves | No | Read path only. |
+| Yjs / Automerge | y-websocket, Hocuspocus or automerge-repo server | MIT | Yes | No | Built for collaborative text; overkill. |
+| Replicache | Our own push/pull endpoints | Free, needs a license key | Yes | No | Superseded by Zero. |
+| Hand-rolled | Our WebSocket server + SQLite or Postgres | Ours | Yes | No | Smallest; we own correctness. |
+
+Sources: [TinyBase synchronizers](https://tinybase.org/guides/synchronization/using-a-synchronizer/), [Jazz sync and storage](https://jazz.tools/docs/sync-and-storage), [InstantDB self-hosting](https://instantdb.com/docs/self-hosting), [Triplit repo](https://github.com/aspen-cloud/triplit), [Zero: when to use](https://zero.rocicorp.dev/docs/when-to-use), [PowerSync self-hosting](https://docs.powersync.com/self-hosting), [PowerSync licensing](https://powersync.com/legal/overview), [Electric writes guide](https://electric-sql.com/docs/guides/writes), [Replicache options](https://doc.replicache.dev/api/interfaces/ReplicacheOptions), [TinyBase Durable Object SQL persister](https://tinybase.org/api/persister-durable-object-sql-storage/interfaces/persister/durableobjectsqlstoragepersister/), [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing), [Durable Objects WebSockets](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).
+
+## Architecture
+
+```
+src/
+  core/       Pure TS, no DOM, no framework: timer and stopwatch engines, digit-entry parser, formatting, frame ticker, settings schema
+  platform/   One interface, two implementations (web, tauri): notifications, audio, windows, hotkeys
+  sync/       TinyBase stores (synced and device-only), IndexedDB persisters, WebSocket synchronizer, server-time offset
+  ui/         Components, keymap, themes
+  i18n/       Messages
+src-tauri/    Rust shell and plugins
+server/       Cloudflare Worker: auth routes, sync endpoint, per-user Durable Object
+```
+
+Status after M1 (2026-10-17): `src/core` (with tests next to each module), `src/ui` (dev harness only) and `src-tauri` exist. `platform/`, `sync/`, `i18n/` and `server/` are planned.
+
+Principles:
+
+1. **Time is derived, never counted.** Store timestamps (`startedAt`, `endsAt`) and accumulated elapsed time; compute the display from the current time. Stays correct across sleep, throttled tabs, reloads and restarts.
+2. **The timer engine is a pure state machine**: `idle → running ⇄ paused → ringing → idle`. Unit-tested with a fake clock.
+3. **One render loop.** A single `requestAnimationFrame` loop drives every running card. Text is written only when the shown value changes. The loop stops when nothing is running.
+4. **Platform features sit behind interfaces.** `core` and `ui` never import Tauri; the web build works on its own.
+5. **Animate on the compositor where possible** (`transform`, `opacity`), and respect `prefers-reduced-motion`.
+6. **Local first.** Every action applies locally and instantly. Sync runs in the background and never blocks the UI.
+
+Core API notes from M1, for the UI work in M2:
+
+- Engine functions return the input state by reference when nothing changes, so `===` detects no-ops. States are plain JSON data; store them in `$state.raw` and replace them whole.
+- Read the frame clock once per user action (`bump()`), then pass that `now` to the transition, so state and display agree.
+- Core exports `timer` and `stopwatch` as namespaces; the UI's state variables need other names.
+- Wanted in core: an `isDigitKey` helper for the keymap, a lap-rows function (`{ split, duration }`), and a shared "apply typed digits, then act" rule so the keymap and buttons cannot drift apart.
+- `formatClockTime` falls back to the runtime locale; pass the app locale once i18n exists.
+- `formatOvertime` shows `0:00` for the first second of ringing, then `-0:01`. The hyphen-minus is not a tabular glyph; the designed card may prefer U+2212.
+- Server-time offsets are rounded to whole milliseconds in `offsetClock`, so the ceil-based countdown never reads a second high.
+
+## Server
+
+```
+Client ──HTTPS──▶ Worker ── /api/auth/* ──▶ Better Auth ──▶ D1 (users, sessions)
+       │                 └─ /time ────────▶ server clock, for skew correction
+       └──WSS /sync──▶ Worker checks the session
+                         └──▶ Durable Object, id = user id
+                                TinyBase WsServerDurableObject
+                                DurableObjectSqlStoragePersister (the user's cards)
+```
+
+- The same Worker serves the web app as static assets.
+- Durable Objects use the WebSocket Hibernation API, so idle devices cost nothing.
+- Free plan: 100,000 requests/day, and WebSocket messages count toward it. Fine for personal use; the Workers Paid plan ($5/month) once the app is public.
+- Local development runs everything with `wrangler dev`.
+- Exit path: TinyBase also ships a Node `WsServer`, and Better Auth runs on Node, so the server can move to a VPS later.
+
+## Platform notes
+
+### Tauri webviews
+
+| OS | Engine | Note |
+|---|---|---|
+| Windows | WebView2 (Chromium) | Best behaved. |
+| macOS | WKWebView (Safari's WebKit) | Test Safari-specific CSS. |
+| Linux | WebKitGTK | Weakest animation performance; test early. |
+
+### Background alarms
+
+- **Web**: Chrome delays timers in hidden tabs (up to 1 minute after 5 minutes hidden). Track alarm deadlines in a Web Worker, show a `Notification`, and unlock audio during the Start click.
+- **Desktop**: schedule alarms in Rust, fire native notifications, keep running in the tray when the window closes.
+- **Mobile web**: cannot ring reliably while the phone is locked. Store apps would need native scheduled notifications.
+
+### Tauri plugins planned
+
+`notification`, `global-shortcut`, `single-instance`, `window-state`, `updater`, `autostart` (opt-in), `deep-link` (sign-in redirect from the system browser), plus the core `tray-icon` feature. No `store` plugin: TinyBase on IndexedDB holds all app data.
+
+Bundle identifier: `com.timerapp.dev` is a placeholder until the final name is chosen (spec Q13). The content security policy in `tauri.conf.json` is still `null`; set a real one before release.
+
+## Shipping
+
+- **Windows**: Authenticode code signing, otherwise SmartScreen warns on install.
+- **macOS**: Developer ID signing and notarization (Apple Developer Program, $99/year).
+- **Linux**: AppImage, `.deb`, `.rpm`.
+- **Auto-update**: `tauri-plugin-updater` with signed update manifests.
+- **Web**: served by the same Cloudflare Worker as the sync server; a service worker precaches the app.
+- **License**: MIT.
+- **Channels**: GitHub Releases (installers and auto-update feed), winget, Homebrew, Microsoft Store.
+- **Microsoft Store**: Tauri builds EXE/MSI, not MSIX, so the listing points at our own signed offline installer. Requirements: WebView2 offline install mode (`tauri.microsoftstore.conf.json`), silent install (`/S` or `/quiet`), publisher name different from product name. Our Windows signing is still required, and updates still come from our updater. See [Tauri: Microsoft Store](https://v2.tauri.app/distribute/microsoft-store/).
+
+## Changelog
+
+- 2026-10-17: Initial proposal.
+- 2026-10-17: Chose Svelte 5. Added cross-device sync to v1. Store apps moved to phase 2.
+- 2026-10-17: Sync runs on our own server. Added sync engine comparison. Proposed Better Auth.
+- 2026-10-17: Chose TinyBase on Cloudflare Workers + Durable Objects (SQLite), Better Auth on D1. TinyBase replaces the separate storage adapter.
+- 2026-10-17: MIT license. Channels: GitHub Releases, winget, Homebrew, Microsoft Store. Email: Resend.
+- 2026-10-17: M1 done. Scaffolded pnpm 12, Vite 8, Svelte 5.57, TypeScript 6.0, Vitest 5, ESLint 10, Prettier, GitHub Actions CI. Implemented `src/core` (timer, stopwatch, digit entry, format, ticker; 641 tests), Tauri 2.12 scaffold (`cargo check` clean), dev harness. Removed the `store` plugin from the plan; TinyBase holds all data.

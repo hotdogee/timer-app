@@ -1,0 +1,9 @@
+dist
+pnpm-lock.yaml
+src-tauri/target
+src-tauri/gen
+src-tauri/icons
+
+# Hand-written prose with compact Markdown tables; Prettier would pad every table.
+docs
+prompts
