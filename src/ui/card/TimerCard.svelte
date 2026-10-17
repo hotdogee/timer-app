@@ -7,18 +7,24 @@
   show in the primary color; Start and the chips apply them first, as the keyboard does, and Reset
   discards them.
 
-  Only a running or ringing timer reads the frame clock, so idle and paused cards cost nothing per
-  frame; display strings are derived from whole seconds and change once a second.
+  Settings: the time style (compact or fixed), the overtime counter (off: a ringing timer stays at
+  `0:00`) and the three quick-add amounts.
+
+  Only a running timer, or a ringing one that counts its overtime, reads the frame clock, so other
+  cards cost nothing per frame; display strings are derived from whole seconds and change once a
+  second. The settings are read in their own deriveds, outside that per-frame path.
 -->
 <script lang="ts">
-  import { cards, digits, formatCountdown, timer, type DigitBuffer, type Ms } from '../../core'
+  import { cards, digits, timer, type DigitBuffer, type Ms } from '../../core'
+  import { m } from '../../i18n'
   import { cardStore } from '../../state/cards.svelte'
+  import { settingsStore } from '../../state/settings.svelte'
   import { runTimer, startTimer } from '../../state/timer-actions'
   import { frameClock } from '../frame-clock.svelte'
   import { Button, Chip } from '../primitives'
   import Card from './Card.svelte'
   import Digits from './Digits.svelte'
-  import { QUICK_ADD, overtimeText, quickAddLabel, timerView } from './display'
+  import { quickAddLabel, timerReadout, timerView } from './display'
   import EndTimeChip from './EndTimeChip.svelte'
   import Ring from './Ring.svelte'
   import type { CardShellProps } from './types'
@@ -38,16 +44,23 @@
 
   let { card, typed = digits.EMPTY, ontyped, onstart, ...shell }: Props = $props()
 
+  const timeStyle = $derived(settingsStore.synced.timeStyle)
+  const showOvertime = $derived(settingsStore.synced.showOvertime)
+  const quickAdd = $derived(settingsStore.synced.quickAdd)
+
   const t = $derived(card.timer)
   const view = $derived(timerView(t, typed))
-  const now = $derived(timer.needsFrames(t) ? frameClock.now : 0)
+  /** Whether the display changes over time: running, or ringing with the overtime counter. */
+  const live = $derived(timer.needsFrames(t) && (t.phase !== 'ringing' || showOvertime))
+  const now = $derived(live ? frameClock.now : 0)
   const remainingSeconds = $derived(Math.ceil(timer.remaining(t, now) / 1000))
   const overtimeSeconds = $derived(Math.floor(timer.overtime(t, now) / 1000))
-  const text = $derived.by(() => {
-    if (view === 'typing') return digits.formatTyped(typed)
-    if (view === 'ringing') return overtimeText(overtimeSeconds * 1000)
-    return formatCountdown(remainingSeconds * 1000)
-  })
+  const text = $derived(
+    timerReadout(view, typed, remainingSeconds * 1000, overtimeSeconds * 1000, {
+      style: timeStyle,
+      showOvertime,
+    }),
+  )
   const progress = $derived(timer.progress(t, now))
   const endsAt = $derived(timer.endTime(t))
 
@@ -93,7 +106,8 @@
 
 {#snippet chips(inert: boolean)}
   <div class="chips" class:spacer={inert} {inert}>
-    {#each QUICK_ADD as ms (ms)}
+    <!-- By position: two chips may add the same amount. -->
+    {#each quickAdd as ms, index (index)}
       <Chip
         label={quickAddLabel(ms)}
         onclick={() => {
@@ -120,7 +134,7 @@
             {#if endsAt !== null}
               <span class="note"><EndTimeChip at={endsAt} /></span>
             {:else if view === 'ringing'}
-              <span class="note times-up">Time's up</span>
+              <span class="note times-up">{m.card_times_up()}</span>
             {/if}
           </div>
         </div>
@@ -133,7 +147,7 @@
   {#snippet controls()}
     {#if view === 'idle' || view === 'typing'}
       <Button
-        label="Start"
+        label={m.card_start()}
         icon="play_arrow"
         hideLabel
         fullWidth
@@ -141,14 +155,20 @@
         onclick={start}
       />
     {:else if view === 'running'}
-      <Button variant="tonal" label="Pause" icon="pause" hideLabel onclick={pause} />
-      <Button variant="tonal" label="Reset" icon="restart_alt" hideLabel onclick={reset} />
+      <Button variant="tonal" label={m.card_pause()} icon="pause" hideLabel onclick={pause} />
+      <Button variant="tonal" label={m.card_reset()} icon="restart_alt" hideLabel onclick={reset} />
     {:else if view === 'paused'}
-      <Button variant="tonal" label="Resume" icon="play_arrow" hideLabel onclick={start} />
-      <Button variant="tonal" label="Reset" icon="restart_alt" hideLabel onclick={reset} />
+      <Button variant="tonal" label={m.card_resume()} icon="play_arrow" hideLabel onclick={start} />
+      <Button variant="tonal" label={m.card_reset()} icon="restart_alt" hideLabel onclick={reset} />
     {:else}
-      <Button label="Dismiss" icon="check" hideLabel onclick={dismiss} />
-      <Button variant="tonal" label="Restart" icon="restart_alt" hideLabel onclick={restart} />
+      <Button label={m.card_dismiss()} icon="check" hideLabel onclick={dismiss} />
+      <Button
+        variant="tonal"
+        label={m.card_restart()}
+        icon="restart_alt"
+        hideLabel
+        onclick={restart}
+      />
     {/if}
   {/snippet}
 </Card>

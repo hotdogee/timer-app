@@ -66,8 +66,11 @@ function finiteTime(at: EpochMs): EpochMs {
   return Number.isFinite(at) ? at : 0
 }
 
-/** A name made usable: trimmed, and the kind's default name when nothing is left. */
-function cardName(name: string, kind: CardKind): string {
+/**
+ * A card name made usable, as every card keeps it: trimmed, and the kind's default name ("Timer")
+ * when nothing is left or it is not a string (stored or imported data).
+ */
+export function cardName(name: unknown, kind: CardKind): string {
   const trimmed = typeof name === 'string' ? name.trim() : ''
   return trimmed === '' ? DEFAULT_NAMES[kind] : trimmed
 }

@@ -5,6 +5,7 @@
   page; it goes to "New timer" instead.
 -->
 <script lang="ts">
+  import { m } from '../../i18n'
   import { cardStore } from '../../state/cards.svelte'
   import { Button, Icon } from '../primitives'
 
@@ -18,12 +19,12 @@
 
 <section class="empty" aria-labelledby="empty-title" data-empty-state>
   <span class="art"><Icon name="hourglass_top" /></span>
-  <h2 id="empty-title" class="title">No timers yet</h2>
-  <p class="hint">Add a timer or a stopwatch to get started.</p>
+  <h2 id="empty-title" class="title">{m.empty_title()}</h2>
+  <p class="hint">{m.empty_hint()}</p>
   <div class="actions">
     <Button
       bind:element={newTimer}
-      label="New timer"
+      label={m.empty_new_timer()}
       icon="add"
       onclick={() => {
         cardStore.addTimer()
@@ -31,7 +32,7 @@
     />
     <Button
       variant="tonal"
-      label="New stopwatch"
+      label={m.empty_new_stopwatch()}
       icon="add"
       onclick={() => {
         cardStore.addStopwatch()

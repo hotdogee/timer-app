@@ -3,7 +3,7 @@
   The command palette (`Mod+K`, spec.md › Command palette): a search field over every command,
   each with its shortcut. Typing filters by fuzzy match; typing 1–6 digits offers
   "New timer HH:MM:SS" first. Up and Down move, Enter runs, Esc closes, and the palette shortcut
-  closes it again. Running a command closes the palette first, so a command that opens another
+  closes it again (one without Ctrl, Alt or Meta types into the search instead). Running a command closes the palette first, so a command that opens another
   dialog or moves focus (rename) works from here. The modal dialog makes the page inert, so it
   carries its own copy of the app's live region.
 
@@ -15,8 +15,10 @@
   import { tick } from 'svelte'
 
   import { keymap } from '../../core'
-  import { detectKeyPlatform } from '../../state/keyboard.svelte'
+  import { m } from '../../i18n'
+  import { detectKeyPlatform, isTextEntry } from '../../state/keyboard.svelte'
   import Announcer from '../Announcer.svelte'
+  import KeyLabel from '../KeyLabel.svelte'
   import Dialog from '../primitives/Dialog.svelte'
   import Icon from '../primitives/Icon.svelte'
   import { paletteResults, type Command, type CommandContext } from './commands'
@@ -113,9 +115,14 @@
       case 'Enter':
         runCommand(results[activeIndex])
         break
-      default:
-        if (keymap.resolveAction(bindings, event, platform) !== 'palette') return
+      default: {
+        // A shortcut without Ctrl, Alt or Meta is typing in the search field.
+        const typing = !event.ctrlKey && !event.altKey && !event.metaKey
+        if (typing && isTextEntry(event.target)) return
+        const pressed = keymap.keyEventForMatching(event)
+        if (keymap.resolveAction(bindings, pressed, platform) !== 'palette') return
         close()
+      }
     }
     event.preventDefault()
     event.stopPropagation()
@@ -130,7 +137,7 @@
 <Dialog
   bind:open
   bind:element={dialog}
-  label="Command palette"
+  label={m.palette_label()}
   placement="top"
   style="--dialog-width: 36rem; --dialog-padding: 0"
   onclose={handleClose}
@@ -142,12 +149,12 @@
       bind:value={query}
       type="text"
       role="combobox"
-      aria-label="Search commands"
+      aria-label={m.palette_search_label()}
       aria-expanded="true"
       aria-controls={listId}
       aria-autocomplete="list"
       aria-activedescendant={activeId}
-      placeholder="Search, or type a duration"
+      placeholder={m.palette_placeholder()}
       autocomplete="off"
       autocapitalize="off"
       spellcheck="false"
@@ -156,7 +163,13 @@
       onkeydown={handleKeydown}
     />
   </div>
-  <ul bind:this={list} id={listId} class="results" role="listbox" aria-label="Commands">
+  <ul
+    bind:this={list}
+    id={listId}
+    class="results"
+    role="listbox"
+    aria-label={m.palette_results_label()}
+  >
     {#each results as command, index (command.id)}
       {@const shortcut = shortcutOf(command)}
       <li
@@ -182,12 +195,12 @@
         </span>
         <span class="title">{command.title}</span>
         {#if command.hint}<span class="hint">{command.hint}</span>{/if}
-        {#if shortcut}<kbd>{shortcut}</kbd>{/if}
+        {#if shortcut}<kbd><KeyLabel label={shortcut} /></kbd>{/if}
       </li>
     {/each}
   </ul>
   {#if results.length === 0}
-    <p class="empty" role="status">No matching commands</p>
+    <p class="empty" role="status">{m.palette_empty()}</p>
   {/if}
   <Announcer />
 </Dialog>

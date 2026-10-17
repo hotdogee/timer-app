@@ -8,8 +8,13 @@ import {
   findConflicts,
   formatCombo,
   isDigitKey,
+  isModifierKey,
+  isReservedCombo,
+  isShiftInsensitive,
+  keyEventForMatching,
   matches,
   parseCombo,
+  parsedCombos,
   resolveAction,
   type ActionId,
   type Bindings,
@@ -104,6 +109,15 @@ describe('DEFAULT_BINDINGS', () => {
     expect(resolveAction(DEFAULT_BINDINGS, ev('z', { metaKey: true }), 'mac')).toBe('undo')
     expect(resolveAction(DEFAULT_BINDINGS, ev('z', { ctrlKey: true }), 'other')).toBe('undo')
     expect(resolveAction(DEFAULT_BINDINGS, ev('z', { ctrlKey: true }), 'mac')).toBeNull()
+  })
+
+  it('opens settings with Mod+, (Cmd+, on macOS, Ctrl+, elsewhere)', () => {
+    expect(DEFAULT_BINDINGS.settings).toEqual(['Mod+,'])
+    expect(resolveAction(DEFAULT_BINDINGS, ev(',', { metaKey: true }), 'mac')).toBe('settings')
+    expect(resolveAction(DEFAULT_BINDINGS, ev(',', { ctrlKey: true }), 'other')).toBe('settings')
+    expect(resolveAction(DEFAULT_BINDINGS, ev(',', { ctrlKey: true }), 'mac')).toBeNull()
+    expect(resolveAction(DEFAULT_BINDINGS, ev(',', { metaKey: true }), 'other')).toBeNull()
+    expect(resolveAction(DEFAULT_BINDINGS, ev(','), 'other')).toBeNull()
   })
 })
 
@@ -258,6 +272,8 @@ describe('formatCombo', () => {
     expect(show('r', 'other')).toBe('R')
     expect(show('Ctrl+ArrowLeft', 'other')).toBe('Ctrl+←')
     expect(show('Space', 'mac')).toBe('Space')
+    expect(show('Mod+,', 'mac')).toBe('⌘,')
+    expect(show('Mod+,', 'other')).toBe('Ctrl+,')
   })
 
   it('normalizes keys in hand-made combos', () => {
@@ -389,6 +405,64 @@ describe('comboFromEvent', () => {
     const loose = { key: 'a', ctrlKey: 1, altKey: undefined, shiftKey: 'yes', metaKey: true }
     expect(comboFromEvent(loose as unknown as KeyEventLike)).toEqual(c('a', { meta: true }))
     expect(comboFromEvent({ key: undefined } as unknown as KeyEventLike)).toEqual(c(''))
+  })
+})
+
+describe('keyEventForMatching', () => {
+  /** A keydown event that reports AltGr held, or not, through `getModifierState`. */
+  function withState(key: string, mods: Partial<Omit<KeyEventLike, 'key'>>, altGraph: boolean) {
+    return { ...ev(key, mods), getModifierState: (name: string) => name === 'AltGraph' && altGraph }
+  }
+
+  it('reads AltGr (Ctrl+Alt with the AltGraph state) as no modifier, keeping Shift', () => {
+    const altGr = withState('@', { ctrlKey: true, altKey: true }, true)
+    expect(keyEventForMatching(altGr)).toEqual(ev('@'))
+    const shifted = withState('|', { ctrlKey: true, altKey: true, shiftKey: true }, true)
+    expect(keyEventForMatching(shifted)).toEqual(ev('|', { shiftKey: true }))
+    expect(resolveAction(rebind({ newTimer: ['@'] }), keyEventForMatching(altGr), 'other')).toBe(
+      'newTimer',
+    )
+  })
+
+  it('passes every other event through as it is', () => {
+    const ctrlAlt = withState('k', { ctrlKey: true, altKey: true }, false)
+    expect(keyEventForMatching(ctrlAlt)).toBe(ctrlAlt)
+    const ctrlOnly = withState('k', { ctrlKey: true }, true)
+    expect(keyEventForMatching(ctrlOnly)).toBe(ctrlOnly)
+    const plain = ev('k', { ctrlKey: true, altKey: true })
+    expect(keyEventForMatching(plain)).toBe(plain)
+  })
+})
+
+describe('isShiftInsensitive', () => {
+  it('holds for printable characters without case', () => {
+    for (const key of ['?', '+', '@', ',', '/', '1']) expect(isShiftInsensitive(key)).toBe(true)
+  })
+
+  it('does not hold for letters, Space and named keys', () => {
+    for (const key of ['a', 'N', ' ', 'Space', 'Enter', 'ArrowUp', 'F2', '']) {
+      expect(isShiftInsensitive(key)).toBe(false)
+    }
+    expect(isShiftInsensitive(5 as unknown as string)).toBe(false)
+  })
+})
+
+describe('parsedCombos', () => {
+  it('lists the parsable bindings of an action with their text, in order', () => {
+    const bindings = rebind({ palette: ['Mod+K', 'Nope+K', 'Mod+P'] })
+    expect(parsedCombos(bindings, 'palette', 'other')).toEqual([
+      { text: 'Mod+K', combo: c('k', { ctrl: true }) },
+      { text: 'Mod+P', combo: c('p', { ctrl: true }) },
+    ])
+    expect(parsedCombos(bindings, 'palette', 'mac')[0]?.combo).toEqual(c('k', { meta: true }))
+    expect(parsedCombos(DEFAULT_BINDINGS, 'dismiss', 'other')).toEqual([])
+  })
+
+  it('skips anything that is not a list of strings', () => {
+    const broken = { ...DEFAULT_BINDINGS, palette: 'Mod+K', lap: [5, 'l'] } as unknown as Bindings
+    expect(parsedCombos(broken, 'palette', 'other')).toEqual([])
+    expect(parsedCombos(broken, 'lap', 'other')).toEqual([{ text: 'l', combo: c('l') }])
+    expect(parsedCombos(null as unknown as Bindings, 'lap', 'other')).toEqual([])
   })
 })
 
@@ -545,6 +619,101 @@ describe('findConflicts', () => {
   it('ignores malformed text and returns nothing for non-bindings', () => {
     expect(findConflicts(rebind({ lap: ['Hyper+R'] }), 'other')).toEqual([])
     expect(findConflicts(undefined as unknown as Bindings, 'other')).toEqual([])
+  })
+})
+
+describe('isModifierKey', () => {
+  it('accepts modifier, lock and function-shift keys', () => {
+    for (const key of [
+      'Shift',
+      'Control',
+      'Alt',
+      'AltGraph',
+      'Meta',
+      'OS',
+      'Hyper',
+      'Super',
+      'CapsLock',
+      'NumLock',
+      'ScrollLock',
+      'Fn',
+      'FnLock',
+      'Symbol',
+      'SymbolLock',
+    ]) {
+      expect(isModifierKey(key), key).toBe(true)
+    }
+  })
+
+  it('rejects other keys, other spellings and non-strings', () => {
+    for (const key of ['a', 'Enter', 'F2', ' ', 'shift', 'Ctrl', 'Cmd', '⌘', '', 'Dead']) {
+      expect(isModifierKey(key), key).toBe(false)
+    }
+    for (const junk of [undefined, null, 42]) {
+      expect(isModifierKey(junk as unknown as string)).toBe(false)
+    }
+  })
+})
+
+describe('isReservedCombo', () => {
+  it('reserves digits and Backspace without Ctrl, Alt or Meta, with or without Shift', () => {
+    for (let d = 0; d <= 9; d++) {
+      expect(isReservedCombo(c(String(d)))).toBe(true)
+      expect(isReservedCombo(c(String(d), { shift: true }))).toBe(true)
+    }
+    expect(isReservedCombo(c('Backspace'))).toBe(true)
+    expect(isReservedCombo(c('Backspace', { shift: true }))).toBe(true)
+  })
+
+  it('lets digits and Backspace with Ctrl, Alt or Meta be bound, as resolveAction does', () => {
+    for (const mod of ['ctrl', 'alt', 'meta'] as const) {
+      expect(isReservedCombo(c('1', { [mod]: true }))).toBe(false)
+      expect(isReservedCombo(c('Backspace', { [mod]: true }))).toBe(false)
+    }
+  })
+
+  it('agrees with resolveAction: a reserved digit combo never resolves, a free one does', () => {
+    for (const platform of PLATFORMS) {
+      for (const mods of [{}, { shiftKey: true }, { ctrlKey: true }, { altKey: true }]) {
+        const event = ev('7', mods)
+        const bound = rebind({ reset: [formatCombo(comboFromEvent(event), platform)] })
+        const resolved = resolveAction(bound, event, platform)
+        expect(resolved === null, JSON.stringify(mods)).toBe(isReservedCombo(comboFromEvent(event)))
+      }
+    }
+  })
+
+  it('reserves bare modifier, lock and function-shift keys, with or without other modifiers', () => {
+    for (const key of ['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'CapsLock', 'Fn']) {
+      expect(isReservedCombo(c(key)), key).toBe(true)
+      expect(isReservedCombo(c(key, { ctrl: true, shift: true })), key).toBe(true)
+    }
+  })
+
+  it('reserves key values that name no single key', () => {
+    for (const key of ['', 'Unidentified', 'Dead', 'Process']) {
+      expect(isReservedCombo(c(key)), key).toBe(true)
+    }
+    expect(isReservedCombo({ key: undefined } as unknown as KeyCombo)).toBe(true)
+  })
+
+  it('allows every other key, including every default binding', () => {
+    for (const key of ['a', 'n', ' ', 'Enter', 'Escape', 'Delete', 'F2', '?', ',', 'ArrowUp']) {
+      expect(isReservedCombo(c(key)), key).toBe(false)
+    }
+    for (const platform of PLATFORMS) {
+      for (const action of ACTION_IDS) {
+        for (const text of DEFAULT_BINDINGS[action]) {
+          const combo = parseCombo(text, platform)
+          expect(combo !== null && !isReservedCombo(combo), text).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('normalizes the key of a hand-made combo', () => {
+    expect(isReservedCombo(c('Spacebar'))).toBe(false)
+    expect(isReservedCombo(c('Esc'))).toBe(false)
   })
 })
 

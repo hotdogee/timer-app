@@ -3,13 +3,15 @@
   A card's header: type icon and name on the left; mute, fullscreen and the mini-window button on
   the right (the mini window stays hidden until the desktop milestone). In edit mode the name
   becomes a text field (Enter or leaving the field saves, Esc reverts) and a drag handle and a
-  delete button appear. `renaming` shows the field outside edit mode too (F2) and focuses it.
-  The type icon is decorative: the card's description says its kind.
+  delete button appear; the delete goes through `ondelete` (the app may ask first). `renaming`
+  shows the field outside edit mode too (F2) and focuses it. The type icon is decorative: the
+  card's description says its kind.
 -->
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments'
 
   import type { cards } from '../../core'
+  import { m } from '../../i18n'
   import { cardStore } from '../../state/cards.svelte'
   import { Icon, IconButton } from '../primitives'
 
@@ -22,6 +24,8 @@
     ontogglefullscreen: () => void
     /** The rename field closed; `refocus` asks the card to take focus back (Enter, Esc). */
     onrenameend: (refocus: boolean) => void
+    /** The delete button was pressed; without it the card is deleted at once. */
+    ondelete?: (() => void) | undefined
     ondragstart?: ((event: PointerEvent) => void) | undefined
     onstep?: ((direction: cards.Direction) => void) | undefined
   }
@@ -33,6 +37,7 @@
     fullscreen,
     ontogglefullscreen,
     onrenameend,
+    ondelete,
     ondragstart,
     onstep,
   }: Props = $props()
@@ -106,8 +111,8 @@
     <button
       type="button"
       class="handle"
-      aria-label="Move {card.name}"
-      title="Drag to move, or use the arrow keys"
+      aria-label={m.card_move({ name: card.name })}
+      title={m.card_move_hint()}
       onpointerdown={(event) => ondragstart?.(event)}
       onkeydown={onHandleKeydown}
     >
@@ -125,7 +130,7 @@
       {@attach saveOnRemove}
       class="name-field"
       type="text"
-      aria-label="Card name"
+      aria-label={m.card_name_label()}
       autocomplete="off"
       spellcheck="false"
       enterkeyhint="done"
@@ -149,16 +154,17 @@
     {#if editing}
       <IconButton
         icon="delete"
-        label="Delete {card.name}"
+        label={m.card_delete({ name: card.name })}
         class="delete"
         onclick={() => {
-          cardStore.remove(card.id)
+          if (ondelete) ondelete()
+          else cardStore.remove(card.id)
         }}
       />
     {/if}
     <IconButton
       icon={card.muted ? 'volume_off' : 'volume_up'}
-      label="Mute"
+      label={m.card_mute()}
       pressed={card.muted}
       onclick={() => {
         cardStore.setMuted(card.id, !card.muted)
@@ -166,13 +172,13 @@
     />
     <IconButton
       icon={fullscreen ? 'fullscreen_exit' : 'fullscreen'}
-      label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+      label={fullscreen ? m.card_exit_fullscreen() : m.card_fullscreen()}
       onclick={ontogglefullscreen}
     />
     <!-- Always-on-top mini window: desktop milestone (M5). -->
     <IconButton
       icon="picture_in_picture_alt"
-      label="Mini window"
+      label={m.card_mini_window()}
       hidden
       data-feature="mini-window"
     />

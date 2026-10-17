@@ -2,7 +2,8 @@
   @component
   A modal dialog on the native `<dialog>`: the browser traps focus, makes the page inert, closes
   on Esc and returns focus to where it was. `open` is bindable and follows every way of closing
-  (Esc, backdrop click, `open = false`); `onclose` runs once per close, whatever the cause.
+  (Esc, backdrop click, `open = false`) at once; `onclose` runs once per close, whatever the cause,
+  except for a close the dialog was reopened right after (its late `close` event is ignored).
 
   Width and padding come from `--dialog-width` and `--dialog-padding`. `placement="top"` sits the
   dialog near the top of the screen, as a command palette does.
@@ -15,7 +16,7 @@
   import type { Snippet } from 'svelte'
   import type { HTMLDialogAttributes } from 'svelte/elements'
 
-  interface Props extends Omit<HTMLDialogAttributes, 'children' | 'open' | 'onclose'> {
+  interface Props extends Omit<HTMLDialogAttributes, 'children' | 'open' | 'onclose' | 'oncancel'> {
     /** Whether the dialog is shown. Bindable; set to false when the dialog closes itself. */
     open?: boolean
     /** Accessible name, when no visible heading is referenced with `aria-labelledby`. */
@@ -49,11 +50,29 @@
   $effect(() => {
     const dialog = element
     if (!dialog) return
-    if (open && !dialog.open) dialog.showModal()
-    else if (!open && dialog.open) dialog.close()
+    if (open) {
+      if (!dialog.open) dialog.showModal()
+      return
+    }
+    if (dialog.open) dialog.close()
+    // Opened from the page itself, the dialog has no control to give focus back to, and focus
+    // stays on its hidden content until the browser notices. Let it go now, so the next key
+    // press (one that opens this dialog again, say) is the page's and not lost in the dialog.
+    const active = dialog.ownerDocument.activeElement
+    if (active instanceof HTMLElement && dialog.contains(active)) active.blur()
   })
 
+  /**
+   * Esc (or another close request): `open` follows at once, not on the `close` event a task later,
+   * so a shortcut pressed right after (opening this dialog again, say) sees it closed.
+   */
+  function handleCancel(event: Event) {
+    if (!event.defaultPrevented) open = false
+  }
+
   function handleClose() {
+    // A close event left over from closing just before the dialog was opened again: it is open.
+    if (element?.open === true) return
     open = false
     onclose?.()
   }
@@ -63,7 +82,10 @@
   }
 
   function handleClick(event: MouseEvent) {
-    if (closeOnBackdrop && pressedBackdrop && event.target === element) element?.close()
+    if (closeOnBackdrop && pressedBackdrop && event.target === element) {
+      element.close()
+      open = false
+    }
     pressedBackdrop = false
   }
 </script>
@@ -74,6 +96,7 @@
   {...rest}
   class={['dialog', placement, className]}
   aria-label={label ?? rest['aria-label']}
+  oncancel={handleCancel}
   onclose={handleClose}
   onpointerdown={handlePointerDown}
   onclick={handleClick}

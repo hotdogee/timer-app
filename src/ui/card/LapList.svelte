@@ -6,7 +6,14 @@
   scrolling). Only the current row reads the frame clock; its total is the card's own readout.
 -->
 <script lang="ts">
-  import { formatElapsed, stopwatch, type EpochMs, type StopwatchState } from '../../core'
+  import {
+    formatElapsed,
+    stopwatch,
+    type EpochMs,
+    type StopwatchState,
+    type TimeStyle,
+  } from '../../core'
+  import { m } from '../../i18n'
 
   interface Props {
     state: StopwatchState
@@ -16,23 +23,25 @@
     total: string
     /** The card's name, so each card's laps region has its own name. */
     name: string
+    /** The time style setting, as the card's readout uses it. */
+    style?: TimeStyle
   }
 
-  let { state, now, total, name }: Props = $props()
+  let { state, now, total, name, style = 'compact' }: Props = $props()
 
   const rows = $derived(stopwatch.lapRows(state))
-  const current = $derived(formatElapsed(stopwatch.currentLap(state, now)))
+  const current = $derived(formatElapsed(stopwatch.currentLap(state, now), style))
 </script>
 
 <!-- Scrollable region: focusable so keyboard users can scroll it. -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-<div class="laps" role="region" aria-label="Laps, {name}" tabindex="0">
+<div class="laps" role="region" aria-label={m.laps_label({ name })} tabindex="0">
   <table>
     <thead>
       <tr>
-        <th scope="col">Lap</th>
-        <th scope="col">Lap time</th>
-        <th scope="col">Total</th>
+        <th scope="col">{m.laps_lap()}</th>
+        <th scope="col">{m.laps_lap_time()}</th>
+        <th scope="col">{m.laps_total()}</th>
       </tr>
     </thead>
     <tbody>
@@ -44,8 +53,8 @@
       {#each rows as row (row.lap)}
         <tr>
           <td>{row.lap}</td>
-          <td>{formatElapsed(row.duration)}</td>
-          <td>{formatElapsed(row.split)}</td>
+          <td>{formatElapsed(row.duration, style)}</td>
+          <td>{formatElapsed(row.split, style)}</td>
         </tr>
       {/each}
     </tbody>
@@ -58,7 +67,8 @@
     max-block-size: min(20cqw, 30vh);
     margin-block-start: calc(-1 * clamp(0.25rem, 1cqw, 1rem));
     padding-block: 0 clamp(0.5rem, 1.5cqw, 1.5rem);
-    padding-inline: clamp(0.625rem, 1.85cqw, 1.75rem);
+    /* Lined up with the card's own padding (Card.svelte). */
+    padding-inline: var(--card-padding, clamp(0.625rem, 1.85cqw, 1.75rem));
     overflow-y: auto;
     overscroll-behavior: contain;
     font-size: clamp(0.8125rem, 2.1cqw, 1.375rem);

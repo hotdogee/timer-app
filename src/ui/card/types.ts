@@ -12,6 +12,11 @@ export interface CardShellProps {
   inert?: boolean
   /** The rename field closed (committed or reverted). */
   onrenameend?: (() => void) | undefined
+  /**
+   * The delete button (edit mode) was pressed. The app may ask first (the confirm-delete
+   * setting); without it the card is deleted at once.
+   */
+  ondelete?: (() => void) | undefined
   /** The pointer went down on the drag handle (edit mode); the grid runs the drag. */
   ondragstart?: ((event: PointerEvent) => void) | undefined
   /** An arrow key on the drag handle: move this card one step. */

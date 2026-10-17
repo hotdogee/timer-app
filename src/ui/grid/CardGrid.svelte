@@ -1,8 +1,9 @@
 <!--
   @component
   The responsive card grid (spec › Layout, Windows Clock style). Columns follow the width: each is
-  at least 22rem, and the grid is at most `count × 49rem` wide and centered, so one card is never
-  wider than 48rem. Cards animate in, out and on reorder (`animate:flip`), all reduced-motion aware.
+  at least `--card-min` (22rem; 18rem in compact density), and the grid is at most
+  `count × (48rem + gap)` wide and centered, so one card is never wider than 48rem. Cards animate
+  in, out and on reorder (`animate:flip`), all reduced-motion aware.
 
   It reports its column count (`bind:columns`, from the resolved `grid-template-columns`) for
   arrow-key navigation and runs drag reordering in edit mode. Focus survives the list changing
@@ -18,6 +19,7 @@
   import { scale, type TransitionConfig } from 'svelte/transition'
 
   import { cards, digits, type DigitBuffer } from '../../core'
+  import { m } from '../../i18n'
   import { cardStore } from '../../state/cards.svelte'
   import StopwatchCard from '../card/StopwatchCard.svelte'
   import TimerCard from '../card/TimerCard.svelte'
@@ -34,6 +36,11 @@
     /** The card whose name field is open outside edit mode (F2), if any. */
     renamingId?: cards.CardId | null
     onrenameend?: (() => void) | undefined
+    /**
+     * A card's delete button was pressed (edit mode). The app may ask first (the confirm-delete
+     * setting); without it the card is deleted at once.
+     */
+    ondelete?: ((id: cards.CardId) => void) | undefined
     /** Runs synchronously inside a timer's Start click (audio unlock, notification permission). */
     onstart?: (() => void) | undefined
     /** How many columns the grid shows now. Bindable; read it for up/down navigation. */
@@ -48,6 +55,7 @@
     editing = false,
     renamingId = null,
     onrenameend,
+    ondelete,
     onstart,
     columns = $bindable(1),
     isolate = null,
@@ -268,13 +276,18 @@
     if (drag !== null) endDrag()
   })
 
+  function remove(id: cards.CardId): void {
+    if (ondelete) ondelete(id)
+    else cardStore.remove(id)
+  }
+
   /** Arrow keys on a drag handle move that card one step, as Ctrl+Arrow does. */
   function step(id: cards.CardId, direction: cards.Direction): void {
     cardStore.moveNeighbor(id, direction, columns)
   }
 </script>
 
-<div class="grid-wrap" role="grid" aria-label="Cards">
+<div class="grid-wrap" role="grid" aria-label={m.grid_label()}>
   <div
     bind:this={grid}
     class={['grid', { dragging: drag !== null }]}
@@ -302,6 +315,9 @@
             renaming={card.id === renamingId}
             inert={isolate !== null && isolate !== card.id}
             {onrenameend}
+            ondelete={() => {
+              remove(card.id)
+            }}
             ondragstart={(event: PointerEvent) => {
               startDrag(card.id, event)
             }}
@@ -317,6 +333,9 @@
             renaming={card.id === renamingId}
             inert={isolate !== null && isolate !== card.id}
             {onrenameend}
+            ondelete={() => {
+              remove(card.id)
+            }}
             ondragstart={(event: PointerEvent) => {
               startDrag(card.id, event)
             }}
@@ -334,11 +353,14 @@
   .grid {
     position: relative;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    /* The narrowest card and the gap follow the density (tokens.css). */
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--card-min, 22rem)), 1fr));
     align-items: start;
-    gap: var(--space-4, 1rem);
+    gap: var(--grid-gap, 1rem);
     /* n cards of at most 48rem plus the gaps between them: a lone card is never wider than 48rem. */
-    max-inline-size: calc(var(--count, 1) * 49rem - 1rem);
+    max-inline-size: calc(
+      var(--count, 1) * (48rem + var(--grid-gap, 1rem)) - var(--grid-gap, 1rem)
+    );
     margin-inline: auto;
   }
 

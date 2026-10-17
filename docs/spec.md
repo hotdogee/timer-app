@@ -60,7 +60,7 @@ Laps: lap and split times list below the controls, newest first with the current
 
 ### Presets
 
-Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the command palette creates a timer card. Presets sync with the account. Built in until user presets arrive with settings: Tea 3:00, Pomodoro 25:00, Break 5:00, Eggs 7:00.
+Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the command palette creates a timer card. Presets are edited in Settings › Presets (add, rename, change the duration, reorder, delete) and sync with the account. A fresh install starts with Tea 3:00, Pomodoro 25:00, Break 5:00, Eggs 7:00.
 
 ### Time format
 
@@ -83,7 +83,7 @@ Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the comm
 
 ### Shortcuts
 
-Digits and `Backspace` are fixed; everything else is rebindable. `Mod` is `Cmd` on macOS and `Ctrl` elsewhere. Shortcuts are ignored while typing in a text field.
+Digits and `Backspace` are fixed; everything else is rebindable. `Mod` is `Cmd` on macOS and `Ctrl` elsewhere. Shortcuts are ignored while typing in a text field, including bare-key shortcuts for the palette and Settings; combos with `Ctrl`, `Alt` or `Meta` still work there.
 
 | Key | Action |
 |---|---|
@@ -104,6 +104,7 @@ Digits and `Backspace` are fixed; everything else is rebindable. `Mod` is `Cmd` 
 | `T` | Always-on-top mini window |
 | `P` | Presets |
 | `Mod+K` | Command palette |
+| `Mod+,` | Settings |
 | `?` | Shortcut cheat sheet |
 
 ### Command palette
@@ -116,11 +117,11 @@ Global hotkeys (desktop, opt-in): start/pause the last-used card without focusin
 
 Default: the sound loops and the card counts up in overtime (`-0:12`) until dismissed, with a system notification. Each of these is a setting:
 
-- Sound (built-in synthesized set: chime, bell, beep; or a custom file), volume, loop or play once.
-- Auto-stop after N minutes.
+- Sound (built-in synthesized set: chime, bell, beep; custom files come later), volume, loop or play once.
+- Auto-stop after N minutes: the sound and the notification stop; the card stays on Time's up until dismissed.
 - Overtime counter (`-0:12`).
 - System notification; taskbar flash / dock bounce.
-- Snooze / restart. Snooze runs the timer for the snooze length and keeps the original duration, so Reset still returns to it.
+- Snooze / restart (deferred past M3). Snooze runs the timer for the snooze length and keeps the original duration, so Reset still returns to it.
 
 Quick-add chips pressed while a timer runs extend both the remaining time and the total, so the ring rescales.
 
@@ -128,7 +129,9 @@ One sound plays at a time: it runs while any unmuted card is ringing and stops w
 
 ## Persistence and instances
 
-- Cards and their state survive reloads, closing the window and reboots. Running timers keep running.
+- Cards and their state survive reloads, closing the window and reboots. Running timers keep running; a timer that ended while the app was closed is ringing when it opens.
+- Storage: a synced TinyBase store (cards, presets, behavior settings) in IndexedDB and a device-only store (appearance, language) in localStorage, so the theme and language are known before the first paint. A fresh install starts with one 5:00 timer and the built-in presets; deleting every card does not bring them back. If IndexedDB is unavailable or does not answer within 3 seconds, the app runs in memory for that session, warns in the console and never overwrites saved data.
+- Web: installable PWA that works offline; a new version shows an "Update ready" snackbar with Reload and Later that stays until one is chosen.
 - Desktop: closing the window hides the app to the tray / menu bar while any timer runs, so alarms still ring; otherwise it quits.
 - Multiple browser tabs stay in sync (`BroadcastChannel`). Desktop runs as a single instance.
 - Cross-device sync: see [Sync](#sync).
@@ -160,19 +163,24 @@ v1 syncs cards and their live state across devices.
 ## Internationalization
 
 - Launch languages: English (`en`), 繁體中文 (`zh-TW`), 日本語 (`ja`).
+- The language follows the browser (Traditional Chinese variants → `zh-TW`, Japanese → `ja`, otherwise English) unless set in Settings; switching applies live, without a reload. Default card names are localized.
 - Right-to-left languages mirror the layout; digits stay left-to-right.
 - Plurals, numbers and times go through ICU messages and `Intl`.
 
 ## Settings
 
+Settings open from the ⚙ button in the action bar, `Mod+,` or the command palette. Changes apply immediately; each section has a Reset.
+
 | Group | Settings |
 |---|---|
-| Appearance | Theme (system / light / dark), seed color, font, font weight, digit size, ring thickness, card density, time format, 12/24-hour |
-| Behavior | Quick-add chip values, default sound, volume, auto-stop, overtime, notifications, confirm before delete |
+| Appearance | Theme (system / light / dark), seed color, font (Roboto Flex, Inter, system), digit weight, digit size, ring thickness, card density, language |
+| Behavior | Time format (compact / fixed), 12/24-hour, quick-add chip values, sound, volume, loop or play once, auto-stop, overtime counter, notifications, confirm before delete |
 | Keyboard | Rebind any shortcut; global hotkeys (desktop) |
+| Presets | Add, rename, change the duration, reorder, delete (no Reset: presets are user data) |
 | Desktop | Launch at login, close behavior, always-on-top |
-| Data | Export / import settings and cards |
+| Data | Export / import cards, presets and settings (JSON) |
 | Account | Sign in / out, sync on / off, delete account and data |
+| About | Version, platform, source code, license |
 
 ## Milestones
 
@@ -180,14 +188,16 @@ v1 syncs cards and their live state across devices.
 |---|---|---|
 | M1 | Project scaffold; core engine (timer, stopwatch, digit entry, formatting, frame ticker) with tests; Tauri scaffold; dev harness | Done 2026-10-17 |
 | M2 | Designed Material 3 card, card grid, edit mode, keyboard layer, command palette | Done 2026-10-18 |
-| M3 | TinyBase stores on IndexedDB, settings and themes, i18n (en, zh-TW, ja), PWA | Planned |
+| M3 | TinyBase stores on IndexedDB, settings and themes, i18n (en, zh-TW, ja), PWA | Done 2026-10-18 |
 | M4 | Sync server on Cloudflare Workers, Better Auth, sign-in flows | Planned |
 | M5 | Desktop: tray, background alarms, mini window, global hotkeys, updater, autostart | Planned |
 | M6 | Release: signing, CI builds, GitHub Releases, winget, Homebrew, Microsoft Store | Planned |
 
 ## Open questions
 
-None right now. New questions continue from Q22.
+- **(Q22)** App icon. A placeholder ships (blue rounded square with a white ring and dot) until a real icon is designed; it is used for the PWA, the favicon and, in M6, the desktop installers.
+
+New questions continue from Q23.
 
 ## Decisions
 
@@ -223,3 +233,9 @@ None right now. New questions continue from Q22.
 | 2026-10-17 | — | Fullscreen via the Fullscreen API with an overlay fallback. Mini window hidden until M5. Built-in presets until M3. |
 | 2026-10-18 | — | M2 card colors: card = secondary tone 20 (dark) / white (light), page = neutral-variant tone 14 / 94, tonal parts = secondary tone 27 / 90; Material's `surface-container` looked too dark and grey beside the reference. Hero digits are 17% of the ring diameter. |
 | 2026-10-18 | — | Time's up: only the ring pulses; the label stays steady for 4.5:1 contrast. Short cards stack the chips beside the ring and drop `+0:30`, then `+5:00`. Fullscreen follows the selection. Restored cards are renumbered when their name was taken. Announcements carry the time; deletes name the undo shortcut. |
+| 2026-10-18 | — | Storage: a synced TinyBase `MergeableStore` in IndexedDB (cards, presets, behavior settings; one cell per field so sync merges field by field) and a device-only store in localStorage (appearance, language). Tabs sync over BroadcastChannel. First run seeds one timer and the built-in presets; no reseeding. |
+| 2026-10-18 | — | Settings dialog (⚙, `Mod+,`, palette) applies changes instantly with per-section Reset. Auto-stop silences the alarm but keeps the card on Time's up. Confirm-before-delete is off by default. Custom sound files are deferred. |
+| 2026-10-18 | — | Language: auto from the browser (Traditional Chinese variants → zh-TW, Japanese → ja, else en), overridable in Settings, switched live. Default card names are localized. |
+| 2026-10-18 | — | PWA: precache the whole app, prompt to update, placeholder icon (Q22). The service worker is not registered inside Tauri. |
+| 2026-10-18 | — | M3 as built: Presets, Data and About have no Reset, and Behavior's Reset keeps the keymap. Rebinding records one key per action, stores combos portably (`Mod`), treats `?` and `Shift+?` as one key, and offers "Move here" on a conflict. Startup falls back to memory when IndexedDB fails or does not answer within 3 s; a tab that cannot save never seeds over its peers. Compact density counts as a short card, so running timers may drop `+0:30`. Snooze is deferred. |
+| 2026-10-18 | — | Text: CJK fallback fonts follow the UI language (Yu Gothic, Hiragino Sans for ja; Microsoft JhengHei, PingFang TC for zh-TW). zh-TW says 預設集 for presets so it does not read as 預設值 (defaults). The placeholder maskable icon fills the safe zone; revisit with the real icon (Q22). |

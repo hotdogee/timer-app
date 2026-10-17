@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { keymap } from '../../core'
+import { setAppLocale } from '../../i18n'
 import { comboLabels, HELP_SECTIONS, helpSections, shortcutLabel } from './shortcuts'
 
 const DEFAULTS = keymap.DEFAULT_BINDINGS
@@ -51,7 +52,7 @@ describe('HELP_SECTIONS', () => {
   })
 
   it('has unique row labels within each section, in the planned groups', () => {
-    expect(HELP_SECTIONS.map((s) => s.title)).toEqual([
+    expect(HELP_SECTIONS.map((s) => s.title())).toEqual([
       'Timer',
       'Stopwatch',
       'Cards',
@@ -59,7 +60,7 @@ describe('HELP_SECTIONS', () => {
       'App',
     ])
     for (const section of HELP_SECTIONS) {
-      const labels = section.rows.map((r) => r.label)
+      const labels = section.rows.map((r) => r.label())
       expect(new Set(labels).size).toBe(labels.length)
     }
   })
@@ -129,11 +130,54 @@ describe('helpSections', () => {
     expect(cardsSection?.rows[0]).toEqual({ label: 'New timer', keys: ['N', 'Insert'] })
   })
 
+  it('lists Settings in the App section, on Mod+,', () => {
+    const app = (platform: keymap.Platform) =>
+      helpSections(DEFAULTS, platform).find((s) => s.title === 'App')?.rows
+    expect(app('other')).toContainEqual({ label: 'Settings', keys: ['Ctrl+,'] })
+    expect(app('mac')).toContainEqual({ label: 'Settings', keys: ['⌘,'] })
+  })
+
   it('drops a section left with no rows', () => {
     const sections = helpSections(DEFAULTS, 'other', [
-      { title: 'Empty', rows: [{ label: 'Nothing', actions: ['dismiss'] }] },
-      { title: 'Kept', rows: [{ label: 'Lap', actions: ['lap'] }] },
+      { title: () => 'Empty', rows: [{ label: () => 'Nothing', actions: ['dismiss'] }] },
+      { title: () => 'Kept', rows: [{ label: () => 'Lap', actions: ['lap'] }] },
     ])
     expect(sections).toEqual([{ title: 'Kept', rows: [{ label: 'Lap', keys: ['L'] }] }])
+  })
+})
+
+describe('helpSections in other locales', () => {
+  afterEach(() => {
+    setAppLocale('en')
+  })
+
+  it('titles sections and rows in the locale active when it runs, keeping key labels', () => {
+    setAppLocale('ja')
+    const [timer, , , navigation] = helpSections(DEFAULTS, 'other')
+    expect(timer?.title).toBe('タイマー')
+    expect(timer?.rows[0]).toEqual({ label: '時間を入力', keys: ['0–9'] })
+    expect(navigation?.rows[1]).toEqual({
+      label: 'カードを移動',
+      modifier: 'Ctrl',
+      keys: ['←', '→', '↑', '↓'],
+    })
+    setAppLocale('zh-TW')
+    expect(helpSections(DEFAULTS, 'mac').map((s) => s.title)).toEqual([
+      '計時器',
+      '碼錶',
+      '卡片',
+      '導覽',
+      '應用程式',
+    ])
+  })
+
+  it('keeps row labels unique within each section in every locale', () => {
+    for (const locale of ['en', 'zh-TW', 'ja'] as const) {
+      setAppLocale(locale)
+      for (const section of helpSections(DEFAULTS, 'other')) {
+        const labels = section.rows.map((r) => r.label)
+        expect(new Set(labels).size, `${locale} ${section.title}`).toBe(labels.length)
+      }
+    }
   })
 })

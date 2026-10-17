@@ -1,10 +1,19 @@
 /*
- * Design tokens that are not colors. Colors (--md-sys-color-*) come from the generated theme,
- * injected at startup by applyTheme() in scheme.ts.
+ * Design tokens that are not colors. Colors (--md-sys-color-*) come from the generated theme in
+ * <style id="theme">. The appearance settings (apply.ts) override some of these on <html>: the
+ * font (--font-ui), the digits' weight and size (--digit-weight, --digit-scale), the ring's
+ * thickness (--ring-scale) and the density (data-density, below).
  */
 :root {
-  /* Type. Roboto Flex is the default (spec Q19); Inter is bundled for the M3 font setting. */
-  --font-ui: 'Roboto Flex Variable', 'Inter Variable', system-ui, sans-serif;
+  /*
+   * Type. Roboto Flex is the default (spec Q19); the font setting may pick Inter or the system
+   * font (apply.ts, FONT_STACKS, which this default matches). --font-cjk names the Chinese or
+   * Japanese UI fonts for the page's language, ahead of system-ui: on a Chinese or Japanese
+   * Windows, system-ui covers every CJK character in its own region's forms, so text in the other
+   * language would never reach sans-serif, the only family that follows lang.
+   */
+  --font-cjk: system-ui;
+  --font-ui: 'Roboto Flex Variable', var(--font-cjk), system-ui, sans-serif;
   --font-digits: var(--font-ui);
 
   /* Shape. */
@@ -40,4 +49,27 @@
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
   --shadow-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px 2px rgb(0 0 0 / 0.15);
   --shadow-3: 0 1px 3px rgb(0 0 0 / 0.3), 0 4px 8px 3px rgb(0 0 0 / 0.15);
+
+  /*
+   * Density: the card's inner padding (in cqw, so it resolves against each card), the gap between
+   * cards and the narrowest card (spec › Layout: 22rem). Compact tightens all three.
+   */
+  --card-padding: clamp(0.625rem, 1.85cqw, 1.75rem);
+  --grid-gap: var(--space-4);
+  --card-min: 22rem;
+}
+
+:root:lang(ja) {
+  --font-cjk:
+    'Yu Gothic UI', 'Hiragino Sans', 'Noto Sans CJK JP', 'Noto Sans JP', Meiryo, system-ui;
+}
+
+:root:lang(zh-TW) {
+  --font-cjk: 'Microsoft JhengHei UI', 'PingFang TC', 'Noto Sans CJK TC', 'Noto Sans TC', system-ui;
+}
+
+:root[data-density='compact'] {
+  --card-padding: clamp(0.5rem, 1.25cqw, 1.25rem);
+  --grid-gap: var(--space-2);
+  --card-min: 18rem;
 }

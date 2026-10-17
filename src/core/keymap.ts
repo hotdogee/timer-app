@@ -56,6 +56,7 @@ export type ActionId =
   | 'presets'
   | 'palette'
   | 'help'
+  | 'settings'
   | 'selectLeft'
   | 'selectRight'
   | 'selectUp'
@@ -88,6 +89,7 @@ export const ACTION_IDS: readonly ActionId[] = Object.freeze([
   'presets',
   'palette',
   'help',
+  'settings',
   'selectLeft',
   'selectRight',
   'selectUp',
@@ -122,6 +124,7 @@ export const DEFAULT_BINDINGS: Bindings = Object.freeze({
   presets: Object.freeze(['p']),
   palette: Object.freeze(['Mod+K']),
   help: Object.freeze(['?']),
+  settings: Object.freeze(['Mod+,']),
   selectLeft: Object.freeze(['ArrowLeft']),
   selectRight: Object.freeze(['ArrowRight']),
   selectUp: Object.freeze(['ArrowUp']),
@@ -228,6 +231,24 @@ const MODIFIER_KEYS = new Set([
   'Super',
 ])
 
+/**
+ * Keys that change other keys or the keyboard's state rather than being pressed for themselves
+ * (the UI Events modifier keys): the modifiers above plus the lock and function-shift keys.
+ */
+const STATE_KEYS = new Set([
+  ...MODIFIER_KEYS,
+  'CapsLock',
+  'NumLock',
+  'ScrollLock',
+  'Fn',
+  'FnLock',
+  'Symbol',
+  'SymbolLock',
+])
+
+/** Key values that do not name one physical key: unknown keys, dead keys and IME composition. */
+const VAGUE_KEYS = new Set(['', 'Unidentified', 'Dead', 'Process'])
+
 /** Function keys F1–F24, any case. */
 const FUNCTION_KEY = /^f([1-9]|1[0-9]|2[0-4])$/i
 
@@ -275,6 +296,16 @@ function canonicalKey(token: string): string | null {
  */
 function shiftInsensitive(key: string): boolean {
   return key !== ' ' && codePoints(key) === 1 && !isCased(key)
+}
+
+/**
+ * Whether a combo with key `key` (a `KeyboardEvent.key` or binding key) matches with or without
+ * Shift: true for printable characters without case (`?`, `+`, `@`), whose Shift depends on the
+ * layout. A shortcut recorder stores and shows these without Shift, as the defaults do (`?`).
+ */
+export function isShiftInsensitive(key: string): boolean {
+  if (typeof key !== 'string') return false
+  return shiftInsensitive(canonicalKey(key) ?? key)
 }
 
 function combo(key: string, mods: ReadonlySet<Modifier>): KeyCombo {
@@ -369,6 +400,24 @@ export function comboFromEvent(e: KeyEventLike): KeyCombo {
   }
 }
 
+/** A keyboard event that may report its modifier state, as a real `KeyboardEvent` does. */
+export interface ModifierStateEventLike extends KeyEventLike {
+  getModifierState?(key: string): boolean
+}
+
+/**
+ * The event as shortcuts read it. AltGr, which Windows reports as Ctrl+Alt with the `AltGraph`
+ * modifier state, is how many layouts type characters (`@` is AltGr+Q on a German keyboard): it
+ * counts as no modifier, so the character it types is the key. Shift stays. Every other event is
+ * returned as it is. The keyboard controller matches events and a shortcut recorder records them
+ * through this, so a recorded AltGr key is the one that later fires.
+ */
+export function keyEventForMatching(e: ModifierStateEventLike): KeyEventLike {
+  if (e.ctrlKey !== true || e.altKey !== true || typeof e.getModifierState !== 'function') return e
+  if (e.getModifierState('AltGraph') !== true) return e
+  return { key: e.key, ctrlKey: false, altKey: false, shiftKey: e.shiftKey, metaKey: false }
+}
+
 /**
  * Whether event `e` triggers `combo`. The key and Ctrl, Alt and Meta must match exactly, so Ctrl+R
  * does not trigger R. Shift must match too, except for printable characters without case, which
@@ -403,6 +452,33 @@ interface CompiledBinding {
 /** Parsed bindings per bindings object and platform, so keydown does not parse text each time. */
 const compiled = new WeakMap<Bindings, Partial<Record<Platform, readonly CompiledBinding[]>>>()
 
+/** One binding of an action: its text as the bindings hold it, and the combo it parses to. */
+export interface ParsedBinding {
+  readonly text: string
+  readonly combo: KeyCombo
+}
+
+/**
+ * The bindings of `action` that parse on `platform`, in binding order, each with its text. Text
+ * that does not parse is skipped, and so is anything that is not a list of strings (untyped
+ * settings), so the result may be empty.
+ */
+export function parsedCombos(
+  bindings: Bindings,
+  action: ActionId,
+  platform: Platform,
+): readonly ParsedBinding[] {
+  if (typeof bindings !== 'object' || bindings === null) return []
+  const texts: unknown = bindings[action]
+  if (!Array.isArray(texts)) return []
+  const out: ParsedBinding[] = []
+  for (const text of texts as unknown[]) {
+    const combo = typeof text === 'string' ? parseCombo(text, platform) : null
+    if (typeof text === 'string' && combo !== null) out.push({ text, combo })
+  }
+  return out
+}
+
 /** The parsable combos of `bindings` in {@link ACTION_IDS} order; malformed text is skipped. */
 function compile(bindings: Bindings, platform: Platform): readonly CompiledBinding[] {
   const cache = compiled.get(bindings) ?? {}
@@ -410,12 +486,7 @@ function compile(bindings: Bindings, platform: Platform): readonly CompiledBindi
   if (hit !== undefined) return hit
   const out: CompiledBinding[] = []
   for (const action of ACTION_IDS) {
-    const texts: unknown = bindings[action]
-    if (!Array.isArray(texts)) continue
-    for (const text of texts as unknown[]) {
-      const parsed = typeof text === 'string' ? parseCombo(text, platform) : null
-      if (parsed !== null) out.push({ action, combo: parsed })
-    }
+    for (const { combo } of parsedCombos(bindings, action, platform)) out.push({ action, combo })
   }
   cache[platform] = out
   compiled.set(bindings, cache)
@@ -468,6 +539,30 @@ export function findConflicts(
   return [...groups.values()]
     .filter((group) => group.actions.length > 1)
     .map((group) => ({ combo: formatCombo(group.combo, platform), actions: group.actions }))
+}
+
+/**
+ * Whether `key` (a `KeyboardEvent.key`) is a modifier, lock or function-shift key (`Shift`,
+ * `Control`, `Alt`, `AltGraph`, `Meta`, `CapsLock`, `Fn`, …). A shortcut recorder sees one of
+ * these first when the user holds a modifier, and should keep waiting for the actual key.
+ */
+export function isModifierKey(key: string): boolean {
+  return typeof key === 'string' && STATE_KEYS.has(key)
+}
+
+/**
+ * Whether `combo` cannot be bound to an action, so a shortcut recorder must refuse it: a digit or
+ * Backspace without Ctrl, Alt or Meta (digit entry owns those, and {@link resolveAction} never
+ * returns an action for them), a bare modifier, lock or function-shift key
+ * ({@link isModifierKey}), or a key value that names no single key (`''`, `Unidentified`, `Dead`,
+ * `Process`). Digits and Backspace with Ctrl, Alt or Meta are bindable. The key is normalized as in
+ * {@link matches}, so hand-made combos work.
+ */
+export function isReservedCombo(combo: KeyCombo): boolean {
+  const raw = typeof combo.key === 'string' ? combo.key : ''
+  const key = canonicalKey(raw) ?? raw
+  if (isModifierKey(key) || VAGUE_KEYS.has(key)) return true
+  return (isDigitKey(key) || key === 'Backspace') && !combo.ctrl && !combo.alt && !combo.meta
 }
 
 /**

@@ -7,8 +7,9 @@
  * not come to depend on the whole list. They write state, so call them from event handlers and
  * effects, never from a template expression or `$derived`.
  *
- * M3 persistence and sync swap the backing by loading with {@link CardStore.replace} and saving
- * {@link CardStore.list} whenever it changes.
+ * Persistence and sync live outside: `sync/cards-bridge.svelte.ts` loads the list with
+ * {@link CardStore.replace} and saves {@link CardStore.list} whenever it changes. The store starts
+ * empty; `startAppData` seeds the first-run card.
  */
 import { untrack } from 'svelte'
 
@@ -21,6 +22,7 @@ import {
   type StopwatchState,
   type TimerState,
 } from '../core'
+import { m } from '../i18n'
 import { platform } from '../platform'
 import { frameClock } from '../ui/frame-clock.svelte'
 
@@ -42,8 +44,9 @@ export interface CardStore {
   readonly lastRemoved: RemovedCard | null
   /**
    * Adds an idle timer (5:00 by default) after the last card, selects it and returns its id. The
-   * name defaults to "Timer", "Timer 2", …; a given name (a preset's) is numbered the same way
-   * when a card already has it ("Tea", "Tea 2"), and a blank one counts as not given.
+   * name defaults to "Timer", "Timer 2", … (the default name from `deps.defaultName`, numbered); a
+   * given name (a preset's) is numbered the same way when a card already has it ("Tea", "Tea 2"),
+   * and a blank one counts as not given.
    */
   addTimer(duration?: Ms, name?: string): cards.CardId
   /** Adds an idle stopwatch after the last card, selects it and returns its id. Names as above. */
@@ -93,7 +96,10 @@ export interface CardStore {
   replace(list: cards.CardList): void
 }
 
-/** What the store needs from outside: ids, the time for new cards, and the clock for actions. */
+/**
+ * What the store needs from outside: ids, the time for new cards, the clock for actions, and the
+ * default names.
+ */
 export interface CardStoreDeps {
   /** A new unique id; a duplicate is tolerated (the store derives an unused one from it). */
   readonly newId: () => cards.CardId
@@ -101,6 +107,11 @@ export interface CardStoreDeps {
   readonly clock: Clock
   /** Reads the clock for an action and returns that `now` (the app bumps the frame clock). */
   readonly bump: () => EpochMs
+  /**
+   * The base of a new card's default name ("Timer", localized), read for each new card without a
+   * given name. Defaults to `cards.DEFAULT_NAMES`; a blank result falls back to it too.
+   */
+  readonly defaultName?: (kind: cards.CardKind) => string
 }
 
 /** Creates an empty card store. */
@@ -111,6 +122,12 @@ export function createCardStore(deps: CardStoreDeps): CardStore {
 
   /** The current list, without subscribing the caller to it. */
   const current = (): cards.CardList => untrack(() => list)
+
+  /** The name a new card is numbered from: the given one unless blank, else the default. */
+  function baseName(kind: cards.CardKind, name: string | undefined): string {
+    if (name !== undefined && name.trim() !== '') return name
+    return deps.defaultName?.(kind) ?? cards.DEFAULT_NAMES[kind]
+  }
 
   /** An id from `deps.newId` that no card in `within` has. */
   function freshId(within: cards.CardList): cards.CardId {
@@ -139,14 +156,14 @@ export function createCardStore(deps: CardStoreDeps): CardStore {
     addTimer(duration, name) {
       const before = current()
       const id = freshId(before)
-      const label = cards.nextDefaultName(before, 'timer', name)
+      const label = cards.nextDefaultName(before, 'timer', baseName('timer', name))
       list = cards.addCard(before, cards.createTimerCard(id, label, deps.clock(), duration))
       return id
     },
     addStopwatch(name) {
       const before = current()
       const id = freshId(before)
-      const label = cards.nextDefaultName(before, 'stopwatch', name)
+      const label = cards.nextDefaultName(before, 'stopwatch', baseName('stopwatch', name))
       list = cards.addCard(before, cards.createStopwatchCard(id, label, deps.clock()))
       return id
     },
@@ -207,8 +224,10 @@ export function createCardStore(deps: CardStoreDeps): CardStore {
 }
 
 /**
- * The app's card store: ids from the platform, `createdAt` from the system clock, and actions
- * timed by the shared frame clock. It starts as on first run (spec): one selected 5:00 "Timer".
+ * The app's card store: ids from the platform, `createdAt` from the system clock, actions timed by
+ * the shared frame clock, and default names in the UI language ("Timer", "計時器", "タイマー"). It
+ * starts empty: `startAppData` loads the saved cards into it (and adds the first-run timer on a
+ * fresh install).
  */
 export const cardStore: CardStore = createCardStore({
   newId: () => platform.ids.newId(),
@@ -217,5 +236,9 @@ export const cardStore: CardStore = createCardStore({
     frameClock.bump()
     return untrack(() => frameClock.now)
   },
+  // Untracked, like the list: an effect that adds a card must not come to follow the locale.
+  defaultName: (kind) =>
+    untrack(() =>
+      kind === 'timer' ? m.card_default_name_timer() : m.card_default_name_stopwatch(),
+    ),
 })
-cardStore.addTimer()

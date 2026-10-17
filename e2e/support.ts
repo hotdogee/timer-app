@@ -1,28 +1,39 @@
 /**
  * Shared pieces of the end-to-end suite: a `test` that fails on page errors, locators for the
- * app's DOM contract, and a paused page clock for tests that depend on time.
+ * app's DOM contract, a paused page clock for tests that depend on time, and helpers for the
+ * settings dialog and for saved data.
  *
  * The DOM contract (from the card, grid and palette components): the grid is `[role=grid]`
  * "Cards"; each card is a `[role=gridcell]` named after the card, with `aria-selected`,
  * `data-kind` and `data-phase`; its digits are `[role=timer]`; controls are buttons named by
- * their action (Start, Pause, Lap, …).
+ * their action (Start, Pause, Lap, …). The settings dialog is the dialog "Settings", with a tab
+ * per section; its controls are named by their row labels.
+ *
+ * Every test starts in a fresh browser context, so its storage is empty: the app opens on its
+ * first run (one 5:00 timer and the built-in presets). Pages of one context share their storage
+ * and stay in step like tabs.
  */
 import { expect, test as base, type Locator, type Page } from '@playwright/test'
 
 /**
- * Playwright's `test`, failing any test whose page logs a console error or throws an uncaught
- * exception: those are bugs even when the flow under test still works.
+ * Playwright's `test`, failing any test whose pages log a console error or throw an uncaught
+ * exception: those are bugs even when the flow under test still works. It watches every page of
+ * the test's context, including ones the test opens itself.
  */
 export const test = base.extend<{ pageErrors: string[] }>({
   pageErrors: [
-    async ({ page }, use) => {
+    async ({ context, page }, use) => {
       const errors: string[] = []
-      page.on('console', (message) => {
-        if (message.type() === 'error') errors.push(`console.error: ${message.text()}`)
-      })
-      page.on('pageerror', (error) => {
-        errors.push(`uncaught: ${error.message}`)
-      })
+      const watch = (watched: Page): void => {
+        watched.on('console', (message) => {
+          if (message.type() === 'error') errors.push(`console.error: ${message.text()}`)
+        })
+        watched.on('pageerror', (error) => {
+          errors.push(`uncaught: ${error.message}`)
+        })
+      }
+      watch(page)
+      context.on('page', watch)
       await use(errors)
       expect(errors, 'errors in the page').toEqual([])
     },
@@ -70,20 +81,138 @@ export function announcer(page: Page): Locator {
   return page.locator('[role="status"][aria-live="polite"]:not(dialog *):not([data-card-id] *)')
 }
 
-/** The undo snackbar (its message and Undo button). */
+/**
+ * The snackbar on screen (its message and action), such as the undo one. Only one shows at a
+ * time; one sliding out is inert and skipped. (The production build also shows "Ready to work
+ * offline" once the service worker has cached the app.)
+ */
 export function snackbar(page: Page): Locator {
-  return page.locator('.snackbar')
+  return page.locator('.snackbar:not([inert])')
 }
 
-/** The live region copy inside the open dialog, the one exposed while the dialog is modal. */
+/**
+ * The live region copy inside the open dialog, the one exposed while the dialog is modal (not the
+ * copy in a closed dialog nested in it, such as Settings › Data's import question).
+ */
 export function dialogAnnouncer(page: Page): Locator {
-  return page.locator('dialog[open] [role="status"][aria-live="polite"]')
+  return page.locator('dialog[open] [role="status"][aria-live="polite"]:not(dialog:not([open]) *)')
 }
 
 /** Opens the app and waits for the first-run card. */
 export async function openApp(page: Page): Promise<void> {
   await page.goto('/')
   await expect(cardCells(page)).toHaveCount(1)
+}
+
+/**
+ * Waits until the app has mounted: its main landmark exists only once the saved data is loaded,
+ * whether it shows cards or the empty state.
+ */
+export async function appMounted(page: Page): Promise<void> {
+  await expect(page.getByRole('main')).toBeAttached()
+}
+
+/** Reloads the page and waits for the app to mount again. */
+export async function reloadApp(page: Page): Promise<void> {
+  await page.reload()
+  await appMounted(page)
+}
+
+/** The settings dialog. */
+export function settingsDialog(page: Page): Locator {
+  return page.getByRole('dialog', { name: 'Settings' })
+}
+
+/** Opens the settings dialog with its shortcut (Mod+,), on `section` when given (its tab name). */
+export async function openSettings(page: Page, section?: string): Promise<Locator> {
+  const dialog = settingsDialog(page)
+  await page.keyboard.press('ControlOrMeta+,')
+  await expect(dialog).toBeVisible()
+  if (section !== undefined) {
+    const tab = dialog.getByRole('tab', { name: section, exact: true })
+    await tab.click()
+    await expect(tab).toHaveAttribute('aria-selected', 'true')
+  }
+  return dialog
+}
+
+/** Closes the settings dialog with its close button. */
+export async function closeSettings(page: Page): Promise<void> {
+  const dialog = settingsDialog(page)
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(dialog).toBeHidden()
+}
+
+/** The IndexedDB database of the synced store (cards, presets, behavior settings). */
+const SYNCED_DB_NAME = 'timer-app'
+
+/**
+ * Everything the synced store has saved in IndexedDB, as JSON text ('' while nothing is saved).
+ * Tests compare snapshots of it to know that a change reached the disk; they do not parse it, so
+ * they do not depend on TinyBase's storage format. Call it once the app has mounted.
+ */
+export function savedData(page: Page): Promise<string> {
+  return page.evaluate(async (dbName) => {
+    const known = await indexedDB.databases()
+    if (!known.some((db) => db.name === dbName)) return ''
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(dbName)
+      request.onsuccess = () => {
+        // Never hold up the app's own upgrade of the database (its first save).
+        request.result.onversionchange = () => {
+          request.result.close()
+        }
+        resolve(request.result)
+      }
+      request.onerror = () => {
+        reject(new Error(`could not open ${dbName}`))
+      }
+    })
+    try {
+      const names = [...db.objectStoreNames].sort()
+      if (names.length === 0) return ''
+      const transaction = db.transaction(names, 'readonly')
+      const contents = await Promise.all(
+        names.map(
+          (name) =>
+            new Promise<unknown>((resolve, reject) => {
+              const request = transaction.objectStore(name).getAll()
+              request.onsuccess = () => {
+                resolve(request.result)
+              }
+              request.onerror = () => {
+                reject(new Error(`could not read ${name}`))
+              }
+            }),
+        ),
+      )
+      return JSON.stringify(contents)
+    } finally {
+      db.close()
+    }
+  }, SYNCED_DB_NAME)
+}
+
+/**
+ * Runs `change`, then waits until the synced store has saved since and is done saving (nothing
+ * new for a moment): a reload, or closing the page, that follows then finds the change on disk.
+ * The app saves a few milliseconds after every change; leaving the page at once could cut that
+ * write short.
+ */
+export async function savedAfter(page: Page, change: () => Promise<unknown>): Promise<void> {
+  const before = await savedData(page)
+  await change()
+  await expect
+    .poll(
+      async () => {
+        const saved = await savedData(page)
+        if (saved === before) return false
+        await page.waitForTimeout(100)
+        return (await savedData(page)) === saved
+      },
+      { message: 'the change is saved to IndexedDB' },
+    )
+    .toBe(true)
 }
 
 /**

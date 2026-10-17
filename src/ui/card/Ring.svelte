@@ -4,7 +4,8 @@
   clockwise from 12 o'clock) and an optional dot for a stopwatch (one turn per minute). Decorative:
   the digits carry the information.
 
-  Sized by the face's `--dial` length. The arc moves every frame without a transition; only a
+  Sized by the face's `--dial` length; the ring thickness setting (`--ring-scale`) scales the
+  stroke, and the stopwatch dot with it. The arc moves every frame without a transition; only a
   backward jump (Restart, a chip extending a running timer) animates. `pulse` fades the ring in and
   out gently for time's up, except with reduced motion.
 
@@ -79,8 +80,11 @@
 
 <style>
   .ring {
-    /* The stroke is 2.5% of the ring (7px on a 660px card, as in the reference), never under 4px. */
-    --stroke: max(4px, calc(var(--dial, 12rem) * 0.025));
+    /*
+     * The stroke is 2.5% of the ring (7px on a 660px card, as in the reference), never under 4px,
+     * times the thickness setting. The dot is sized from the stroke, so it scales too.
+     */
+    --stroke: calc(max(4px, calc(var(--dial, 12rem) * 0.025)) * var(--ring-scale, 1));
     display: block;
     inline-size: var(--dial, 12rem);
     block-size: var(--dial, 12rem);

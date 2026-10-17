@@ -3,11 +3,14 @@
   A stopwatch card (spec › Card › Stopwatch). Idle: `0.00` and a full-width Start. Running: the
   elapsed time with centiseconds inside a ring whose dot turns once a minute; Pause, Lap, Reset.
   Paused: frozen; Resume, Reset. Laps list below the controls once the first lap is recorded.
-  Only a running stopwatch reads the frame clock.
+  Times follow the time style setting (`1:05.43`, fixed `00:01:05.43`). Only a running stopwatch
+  reads the frame clock.
 -->
 <script lang="ts">
   import { formatElapsed, stopwatch, type cards } from '../../core'
+  import { m } from '../../i18n'
   import { cardStore } from '../../state/cards.svelte'
+  import { settingsStore } from '../../state/settings.svelte'
   import { frameClock } from '../frame-clock.svelte'
   import { Button } from '../primitives'
   import Card from './Card.svelte'
@@ -23,10 +26,11 @@
 
   let { card, ...shell }: Props = $props()
 
+  const timeStyle = $derived(settingsStore.synced.timeStyle)
   const s = $derived(card.stopwatch)
   const now = $derived(stopwatch.needsFrames(s) ? frameClock.now : 0)
   const elapsed = $derived(stopwatch.elapsed(s, now))
-  const text = $derived(formatElapsed(elapsed))
+  const text = $derived(formatElapsed(elapsed, timeStyle))
   const dot = $derived(dotTurn(elapsed))
   const hasLaps = $derived(s.phase !== 'idle' && s.laps.length > 0)
 
@@ -63,20 +67,20 @@
 
   {#snippet controls()}
     {#if s.phase === 'idle'}
-      <Button label="Start" icon="play_arrow" hideLabel fullWidth onclick={start} />
+      <Button label={m.card_start()} icon="play_arrow" hideLabel fullWidth onclick={start} />
     {:else if s.phase === 'running'}
-      <Button variant="tonal" label="Pause" icon="pause" hideLabel onclick={pause} />
-      <Button variant="tonal" label="Lap" icon="flag" hideLabel onclick={lap} />
-      <Button variant="tonal" label="Reset" icon="restart_alt" hideLabel onclick={reset} />
+      <Button variant="tonal" label={m.card_pause()} icon="pause" hideLabel onclick={pause} />
+      <Button variant="tonal" label={m.card_lap()} icon="flag" hideLabel onclick={lap} />
+      <Button variant="tonal" label={m.card_reset()} icon="restart_alt" hideLabel onclick={reset} />
     {:else}
-      <Button variant="tonal" label="Resume" icon="play_arrow" hideLabel onclick={start} />
-      <Button variant="tonal" label="Reset" icon="restart_alt" hideLabel onclick={reset} />
+      <Button variant="tonal" label={m.card_resume()} icon="play_arrow" hideLabel onclick={start} />
+      <Button variant="tonal" label={m.card_reset()} icon="restart_alt" hideLabel onclick={reset} />
     {/if}
   {/snippet}
 
   {#snippet after()}
     {#if hasLaps}
-      <LapList state={s} {now} total={text} name={card.name} />
+      <LapList state={s} {now} total={text} name={card.name} style={timeStyle} />
     {/if}
   {/snippet}
 </Card>
