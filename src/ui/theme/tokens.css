@@ -1,0 +1,43 @@
+/*
+ * Design tokens that are not colors. Colors (--md-sys-color-*) come from the generated theme,
+ * injected at startup by applyTheme() in scheme.ts.
+ */
+:root {
+  /* Type. Roboto Flex is the default (spec Q19); Inter is bundled for the M3 font setting. */
+  --font-ui: 'Roboto Flex Variable', 'Inter Variable', system-ui, sans-serif;
+  --font-digits: var(--font-ui);
+
+  /* Shape. */
+  --radius-card: 16px;
+  --radius-pill: 999px;
+  --radius-small: 8px;
+  --radius-dialog: 28px;
+
+  /* Spacing: a 4px-based scale. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  /* Smallest pointer target for any control (WCAG 2.5.5 asks for 44px). */
+  --touch-target: 44px;
+
+  /* Motion: M3 durations and the emphasized easing curves. Zeroed for reduced motion in app.css. */
+  --duration-short: 150ms;
+  --duration-medium: 300ms;
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --easing-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --easing-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+
+  /* M3 state layers: opacity of the content color painted over a control. */
+  --state-hover: 0.08;
+  --state-focus: 0.1;
+  --state-pressed: 0.1;
+
+  /* M3 elevation levels 1–3 (cards, menus, snackbars and dialogs). */
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+  --shadow-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px 2px rgb(0 0 0 / 0.15);
+  --shadow-3: 0 1px 3px rgb(0 0 0 / 0.3), 0 4px 8px 3px rgb(0 0 0 / 0.15);
+}

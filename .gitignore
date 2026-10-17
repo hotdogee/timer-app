@@ -24,3 +24,8 @@ pnpm-debug.log*
 Thumbs.db
 *.suo
 *.sw?
+
+# Playwright output (screenshots are review artifacts, not committed)
+test-results
+playwright-report
+blob-report

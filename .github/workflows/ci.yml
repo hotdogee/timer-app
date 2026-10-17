@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   web:
-    name: Check, lint, test, build
+    name: Check, lint, test, build, e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -34,3 +34,16 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+      # End-to-end tests run against the production build (`pnpm preview`; see playwright.config.ts).
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+
+      # Traces of failed tests, plus screenshots saved for review (not pixel-asserted).
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14

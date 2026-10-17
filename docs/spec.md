@@ -1,6 +1,6 @@
 # Product spec
 
-Draft, last updated 2026-10-17. Open items are tagged **(Qn)** and listed under [Open questions](#open-questions). Stack and architecture: [tech-stack.md](tech-stack.md).
+Draft, last updated 2026-10-18. Open items are tagged **(Qn)** and listed under [Open questions](#open-questions). Stack and architecture: [tech-stack.md](tech-stack.md).
 
 Design references in [design/](design/):
 
@@ -22,16 +22,20 @@ Design references in [design/](design/):
 
 ## Layout
 
-- Responsive grid of cards, as in Windows Clock. Column count follows available width; cards size themselves with container queries.
-- Each card is either a timer or a stopwatch, fixed when it's created.
-- Floating action bar, bottom right: edit (✎), + Timer, + Stopwatch.
-- Edit mode: rename, delete, reorder by drag or keyboard.
+- Responsive grid of cards, as in Windows Clock. Column count follows available width; cards size themselves with container queries. Cards are at least 22rem and at most 48rem wide; a lone card sits centered. Cards keep a 3:2 shape and grow taller only to show laps.
+- Each card is either a timer or a stopwatch, fixed when it's created. New cards are named "Timer", "Timer 2", … (smallest unused number); the default timer is 5:00.
+- Clicking a card selects it; the selected card has a 2px outline in the primary color.
+- Floating action bar, bottom right: edit (✎), + Timer (a menu: 5:00 and the presets), + Stopwatch. Labels collapse to icons on narrow screens.
+- Edit mode (✎ or `E`): the name becomes a text field, delete and drag handles appear; reorder by drag or `Ctrl+Arrow` (which also works outside edit mode). Cards keep running.
+- Delete (`Delete`, any mode) shows a 6-second snackbar with Undo; `Ctrl/Cmd+Z` undoes while it is visible. A restored card is renumbered if its name was taken meanwhile.
 
 ## Card
 
-Visuals follow the Google (Material 3) card, except the Timer/Stopwatch toggle is replaced by the card's type icon (⧗ timer, ◷ stopwatch) and name.
+Visuals follow the Google (Material 3) card, except the Timer/Stopwatch toggle is replaced by the card's type icon (⧗ timer, ◷ stopwatch) and name. Card colors come from the seed's Material palettes: in dark mode the card is secondary tone 20 on a neutral-variant tone 14 page, and chips, tonal buttons and the ring track are secondary tone 27; in light mode the card is white on neutral-variant tone 94, with secondary tone 90 for the tonal parts. Material's `surface-container` roles looked too dark and grey beside the reference card. Hero digits are 17% of the ring diameter.
 
-Header: icon and name, mute, fullscreen, always-on-top mini window.
+Header: icon and name, mute, fullscreen, always-on-top mini window (hidden until the desktop milestone).
+
+Fullscreen uses the browser Fullscreen API; where it is unavailable (iOS Safari) the card expands into an overlay. `Esc` leaves either. The fullscreen card follows the selection, so arrow keys switch which card fills the screen.
 
 Mini window: a compact card floating above other apps. Desktop uses a Tauri always-on-top window; web uses Document Picture-in-Picture (Chrome and Edge; the button is hidden elsewhere).
 
@@ -39,24 +43,24 @@ Mini window: a compact card floating above other apps. Desktop uses a Tauri alwa
 
 | State | Display | Controls |
 |---|---|---|
-| Idle | Set duration (`5:00`), editable; quick-add chips `+0:30` `+1:00` `+5:00` | Full-width Start |
-| Running | Remaining time; ring fills with elapsed progress; end-time label ("🔔 2:47 PM") | Pause, Reset |
-| Paused | Remaining time; ring frozen | Resume, Reset |
-| Time's up | Overtime counting up (`-0:12`); sound loops | Dismiss, Restart |
+| Idle | Set duration (`5:00`) with an underline; quick-add chips `+0:30` `+1:00` `+5:00` (very short cards drop `+0:30`, then `+5:00`) | Full-width Start |
+| Running | Remaining time inside the ring; the arc grows clockwise from 12 o'clock with elapsed progress; end-time chip ("🔔 2:47 PM"); chips stay available (stacked beside the ring on short cards) | Pause, Reset |
+| Paused | Remaining time; ring frozen; chips stay available | Resume, Reset |
+| Time's up | Ring full; label "Time's up"; overtime counting up (`-0:12`); the ring pulses gently (off with reduced motion) while the label stays steady for contrast; sound loops | Dismiss, Restart |
 
 ### Stopwatch
 
 | State | Display | Controls |
 |---|---|---|
 | Idle | `0.00` | Full-width Start |
-| Running | Elapsed with centiseconds; dot travels the ring | Pause, Reset |
+| Running | Elapsed with centiseconds; a dot travels the ring once per minute | Pause, Lap, Reset |
 | Paused | Elapsed; frozen | Resume, Reset |
 
-Laps: a Lap button appears while running; lap and split times list below the ring.
+Laps: lap and split times list below the controls, newest first with the current lap on top; the card grows to fit a few rows and scrolls beyond that.
 
 ### Presets
 
-Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the command palette creates a timer card. Presets sync with the account.
+Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the command palette creates a timer card. Presets sync with the account. Built in until user presets arrive with settings: Tea 3:00, Pomodoro 25:00, Break 5:00, Eggs 7:00.
 
 ### Time format
 
@@ -77,23 +81,34 @@ Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the comm
 - One card is always selected (highlighted); arrow keys move the selection. Digits edit the selected timer when it isn't running; on a paused timer they replace the duration and reset it; on a ringing timer they dismiss it and set the new duration. On a stopwatch or a running timer, digits do nothing.
 - `Enter` with nothing typed starts the selected timer, or dismisses it when ringing.
 
-### Shortcuts (proposed, all rebindable)
+### Shortcuts
+
+Digits and `Backspace` are fixed; everything else is rebindable. `Mod` is `Cmd` on macOS and `Ctrl` elsewhere. Shortcuts are ignored while typing in a text field.
 
 | Key | Action |
 |---|---|
-| `Space` | Start / pause |
+| `Space` | Start / pause (applies typed digits first) |
 | `Enter` | Start (while editing) / dismiss alarm |
-| `R` | Reset |
-| Arrow keys | Move between cards |
-| `N` | New card |
+| `R` | Reset (discards typed digits) |
+| `Esc` | Cancel typing, close dialogs, leave edit mode |
+| Arrow keys | Move the selection between cards |
+| `Ctrl+Arrow` | Move the selected card |
+| `N` / `Shift+N` | New timer / new stopwatch |
 | `Delete` | Delete card (with undo) |
+| `Mod+Z` | Undo delete |
+| `E` | Edit mode |
+| `F2` | Rename |
 | `F` | Fullscreen card |
 | `M` | Mute card |
 | `L` | Lap (stopwatch) |
 | `T` | Always-on-top mini window |
 | `P` | Presets |
-| `Ctrl/Cmd+K` | Command palette |
+| `Mod+K` | Command palette |
 | `?` | Shortcut cheat sheet |
+
+### Command palette
+
+`Mod+K` opens a searchable list of every command (new cards, presets, actions on the selected card, edit mode, help), each with its shortcut. Matching is a case-insensitive subsequence match. Typing 1–6 digits offers "New timer HH:MM:SS" first; `Enter` creates and starts it.
 
 Global hotkeys (desktop, opt-in): start/pause the last-used card without focusing the app.
 
@@ -101,13 +116,15 @@ Global hotkeys (desktop, opt-in): start/pause the last-used card without focusin
 
 Default: the sound loops and the card counts up in overtime (`-0:12`) until dismissed, with a system notification. Each of these is a setting:
 
-- Sound (bundled set or custom file), volume, loop or play once.
+- Sound (built-in synthesized set: chime, bell, beep; or a custom file), volume, loop or play once.
 - Auto-stop after N minutes.
 - Overtime counter (`-0:12`).
 - System notification; taskbar flash / dock bounce.
 - Snooze / restart. Snooze runs the timer for the snooze length and keeps the original duration, so Reset still returns to it.
 
 Quick-add chips pressed while a timer runs extend both the remaining time and the total, so the ring rescales.
+
+One sound plays at a time: it runs while any unmuted card is ringing and stops when none is. Audio is unlocked on the first click or key press and again on every Start, as browsers require. Notification permission is requested the first time a timer starts; clicking a notification focuses the app and dismisses that card. A Web Worker holds the next deadline so a hidden browser tab still rings on time.
 
 ## Persistence and instances
 
@@ -137,7 +154,7 @@ v1 syncs cards and their live state across devices.
 - Full keyboard operation with a visible focus ring.
 - Respects `prefers-reduced-motion`, `prefers-color-scheme` and Windows high contrast (`forced-colors`).
 - User-chosen colors are contrast-checked.
-- Screen readers: digits use `role="timer"`; announcements on start, pause and time's up, never every second.
+- Screen readers: digits use `role="timer"`; the selected card carries `aria-selected`; one polite live region announces start, pause and resume (with the time), time's up, dismiss, reset, card add, move, delete (naming the undo shortcut) and restore, never every second.
 - Text scales with OS font-size settings.
 
 ## Internationalization
@@ -162,7 +179,7 @@ v1 syncs cards and their live state across devices.
 | # | Scope | Status |
 |---|---|---|
 | M1 | Project scaffold; core engine (timer, stopwatch, digit entry, formatting, frame ticker) with tests; Tauri scaffold; dev harness | Done 2026-10-17 |
-| M2 | Designed Material 3 card, card grid, edit mode, keyboard layer, command palette | Planned |
+| M2 | Designed Material 3 card, card grid, edit mode, keyboard layer, command palette | Done 2026-10-18 |
 | M3 | TinyBase stores on IndexedDB, settings and themes, i18n (en, zh-TW, ja), PWA | Planned |
 | M4 | Sync server on Cloudflare Workers, Better Auth, sign-in flows | Planned |
 | M5 | Desktop: tray, background alarms, mini window, global hotkeys, updater, autostart | Planned |
@@ -170,7 +187,7 @@ v1 syncs cards and their live state across devices.
 
 ## Open questions
 
-None right now. New questions continue from Q19.
+None right now. New questions continue from Q22.
 
 ## Decisions
 
@@ -198,3 +215,11 @@ None right now. New questions continue from Q19.
 | 2026-10-17 | — | Digit entry: six significant digits; leading zeros and a seventh digit are ignored. Enter with nothing typed starts (or dismisses). Typing on a ringing timer sets a new duration. |
 | 2026-10-17 | — | Rounding: countdowns round up to the second, elapsed time and overtime round down. Compact countdown always shows minutes (`0:05`); the stopwatch shows centiseconds. |
 | 2026-10-17 | — | Quick-add while running extends remaining time and total. Snooze keeps the original duration for Reset. |
+| 2026-10-17 | Q19 | Fonts: Roboto Flex (default) and Inter are both bundled, self-hosted. |
+| 2026-10-17 | Q20 | Default seed color follows the OS accent color (Windows, macOS, GNOME on desktop; the browser's accent where exposed), falling back to Google blue `#0B57D0`. |
+| 2026-10-17 | Q21 | Alarm sounds are synthesized with Web Audio (built-in chime, bell, beep); custom sound files come with settings. |
+| 2026-10-17 | — | M2 layout: cards 22–48rem wide, 3:2, centered when few; click selects; names auto-number; Delete anywhere with a 6-second Undo; `Ctrl+Arrow` reorders. |
+| 2026-10-17 | — | M2 shortcuts added: `Shift+N`, `E`, `F2`, `Mod+Z`, `Esc`, `Ctrl+Arrow`. Palette turns typed digits into a new timer. Stopwatch dot: one revolution per minute. |
+| 2026-10-17 | — | Fullscreen via the Fullscreen API with an overlay fallback. Mini window hidden until M5. Built-in presets until M3. |
+| 2026-10-18 | — | M2 card colors: card = secondary tone 20 (dark) / white (light), page = neutral-variant tone 14 / 94, tonal parts = secondary tone 27 / 90; Material's `surface-container` looked too dark and grey beside the reference. Hero digits are 17% of the ring diameter. |
+| 2026-10-18 | — | Time's up: only the ring pulses; the label stays steady for 4.5:1 contrast. Short cards stack the chips beside the ring and drop `+0:30`, then `+5:00`. Fullscreen follows the selection. Restored cards are renumbered when their name was taken. Announcements carry the time; deletes name the undo shortcut. |
