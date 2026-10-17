@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.node.json",
+  "compilerOptions": {
+    // Test bodies run in Node; callbacks passed to page.evaluate() run in the browser.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["**/*.ts", "../playwright.config.ts"]
+}

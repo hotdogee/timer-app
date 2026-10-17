@@ -1,6 +1,6 @@
 # Tech stack
 
-Proposed, last updated 2026-10-17. Open items are tagged **(Qn)**; see [spec.md › Open questions](spec.md#open-questions).
+Proposed, last updated 2026-10-18. Open items are tagged **(Qn)**; see [spec.md › Open questions](spec.md#open-questions).
 
 ## Summary
 
@@ -21,9 +21,10 @@ One TypeScript web codebase, shipped two ways:
 | Package manager | pnpm 12 | Pinned through `packageManager` in `package.json`. |
 | Lint / format | ESLint 10 (flat config, typescript-eslint, eslint-plugin-svelte), Prettier | |
 | Styling | Plain CSS, custom properties as design tokens, container queries | Runtime theming is a variable swap with no re-render. Each card scales from its own container size, phone to 4K. |
-| Color | `@material/material-color-utilities` | Builds Material 3 light and dark palettes from one seed color, with valid contrast. |
+| Color | `@material/material-color-utilities` | Builds Material 3 light and dark palettes from one seed color, with valid contrast. The default seed is the OS accent color (read through the platform interface), falling back to Google blue `#0B57D0`. Browsers return a fixed value for the CSS `AccentColor` keyword to prevent fingerprinting, so the web always uses the fallback; desktop reads the real accent through Tauri. The default seed's theme is precomputed into `src/ui/theme/default-theme.css` (a Vitest file snapshot; regenerate with `pnpm test -u`), so the color library (about 20 kB gzip) loads lazily and only for another seed. |
 | Icons | Material Symbols (SVG, Apache 2.0) | Matches the card design. |
-| Font | Variable font (Roboto Flex or Inter), self-hosted | Variable weight makes a font-weight setting cheap. Digits use `tabular-nums`. |
+| Fonts | Roboto Flex (default) and Inter, variable, self-hosted via `@fontsource-variable` | Variable weight makes a font-weight setting cheap. Digits use `tabular-nums`. |
+| Sound | Web Audio, synthesized | Built-in chime, bell and beep are generated in code: no audio assets, no licensing. Custom files are decoded with the same API. |
 | i18n | Paraglide JS + `Intl` | Compiled, type-safe, tree-shaken messages. `Intl` handles times, numbers and plurals per locale. |
 | Keyboard | Own keymap layer (may use `tinykeys`) | Every shortcut is rebindable and stored in settings. |
 | Data store | TinyBase, persisted to IndexedDB | Two stores: a synced `MergeableStore` (cards, behavior settings) and a device-only store (appearance). IndexedDB works in the browser and in the Tauri webview. |
@@ -34,7 +35,7 @@ One TypeScript web codebase, shipped two ways:
 | Email | Resend | Sends sign-in codes; called from the Worker with `fetch`. |
 | Offline / install | `vite-plugin-pwa` (Workbox) | |
 | Unit tests | Vitest with fake timers | Timer engine, digit-entry parser, migrations. |
-| E2E tests | Playwright | Keyboard flows, light/dark visual snapshots, responsive breakpoints. |
+| E2E tests | Playwright (Chromium) | Keyboard flows, alarm orchestration, focus, responsive breakpoints, frame-loop checks; the page clock is faked, so timing tests are exact. Locally they run against the dev server, in CI against the production build. Light/dark screenshots are saved as artifacts, not pixel-asserted, because CI runs Linux and development runs Windows. |
 | CI / release | GitHub Actions + `tauri-action` | Builds and signs for all three desktop OSes. |
 
 ## Alternatives considered
@@ -72,16 +73,18 @@ Sources: [TinyBase synchronizers](https://tinybase.org/guides/synchronization/us
 
 ```
 src/
-  core/       Pure TS, no DOM, no framework: timer and stopwatch engines, digit-entry parser, formatting, frame ticker, settings schema
-  platform/   One interface, two implementations (web, tauri): notifications, audio, windows, hotkeys
+  core/       Pure TS, no DOM, no framework: timer and stopwatch engines, digit-entry parser, formatting, frame ticker, card model, keymap, settings schema
+  platform/   One interface, two implementations (web, tauri): accent color, notifications, audio, wake timer, fullscreen, ids, windows, hotkeys
+  state/      Reactive app state (.svelte.ts): card store, alarm orchestration, keyboard controller, shared timer actions (apply typed digits, then act), presets
   sync/       TinyBase stores (synced and device-only), IndexedDB persisters, WebSocket synchronizer, server-time offset
-  ui/         Components, keymap, themes
+  ui/         Components: theme (tokens, generated M3 scheme), primitives, card, grid, command palette, cheat sheet
   i18n/       Messages
+e2e/          Playwright tests
 src-tauri/    Rust shell and plugins
 server/       Cloudflare Worker: auth routes, sync endpoint, per-user Durable Object
 ```
 
-Status after M1 (2026-10-17): `src/core` (with tests next to each module), `src/ui` (dev harness only) and `src-tauri` exist. `platform/`, `sync/`, `i18n/` and `server/` are planned.
+Status after M2 (2026-10-18): `src/core`, `src/platform` (web implementations only), `src/state`, `src/ui` (theme, primitives, card, grid, palette, cheat sheet, announcer), `e2e/` and `src-tauri` exist, with tests next to each module. `sync/`, `i18n/` and `server/` are planned; the Tauri side of `platform/` comes in M5.
 
 Principles:
 
@@ -97,10 +100,19 @@ Core API notes from M1, for the UI work in M2:
 - Engine functions return the input state by reference when nothing changes, so `===` detects no-ops. States are plain JSON data; store them in `$state.raw` and replace them whole.
 - Read the frame clock once per user action (`bump()`), then pass that `now` to the transition, so state and display agree.
 - Core exports `timer` and `stopwatch` as namespaces; the UI's state variables need other names.
-- Wanted in core: an `isDigitKey` helper for the keymap, a lap-rows function (`{ split, duration }`), and a shared "apply typed digits, then act" rule so the keymap and buttons cannot drift apart.
+- Done in M2: `isDigitKey` lives in the keymap, `stopwatch.lapRows` gives `{ split, duration }` rows, and `src/state/timer-actions.ts` holds the one "apply typed digits, then act" rule shared by keys, buttons and the palette.
 - `formatClockTime` falls back to the runtime locale; pass the app locale once i18n exists.
 - `formatOvertime` shows `0:00` for the first second of ringing, then `-0:01`. The hyphen-minus is not a tabular glyph; the designed card may prefer U+2212.
 - Server-time offsets are rounded to whole milliseconds in `offsetClock`, so the ceil-based countdown never reads a second high.
+
+Build and runtime notes from M2:
+
+- Build target: Chrome 105, Edge 105, Firefox 110, Safari 16 (Windows Tauri builds: Chrome 105). The CSS needs container queries, `:has()` and logical properties; a lower JS target would down-level Svelte's private class fields into WeakMap helpers that run on every state write.
+- Theme: a `<style id="theme">` block carries `:root`, `:root[data-theme="dark"]` and a `prefers-color-scheme` section with `--md-sys-color-*` roles plus the app surfaces (`--app-background`, `--card-surface`, `--card-tonal`); `applyTheme(seed)` replaces it and updates the `theme-color` metas.
+- Fonts: own `@font-face` rules for the latin subset, so only two woff2 files ship (Roboto Flex 84 kB, Inter 48 kB); Inter is fetched only when selected. Icons: Material Symbols SVGs imported with `?raw`, path data rendered inline.
+- Audio: one `AudioContext`, unlocked by the first gesture and suspended 2 s after the last sound, so an app left open all day keeps no audio thread; a ringing timer resumes it through sticky activation.
+- Wake: `platform.wake` posts the next deadline to a module Worker (`wake.worker.ts`) because hidden tabs throttle timers; on `visibilitychange` every card is settled.
+- Bundle after M2: main chunk about 52 kB gzip, lazy color chunk 20 kB, CSS 6 kB.
 
 ## Server
 
@@ -160,3 +172,4 @@ Bundle identifier: `com.timerapp.dev` is a placeholder until the final name is c
 - 2026-10-17: Chose TinyBase on Cloudflare Workers + Durable Objects (SQLite), Better Auth on D1. TinyBase replaces the separate storage adapter.
 - 2026-10-17: MIT license. Channels: GitHub Releases, winget, Homebrew, Microsoft Store. Email: Resend.
 - 2026-10-17: M1 done. Scaffolded pnpm 12, Vite 8, Svelte 5.57, TypeScript 6.0, Vitest 5, ESLint 10, Prettier, GitHub Actions CI. Implemented `src/core` (timer, stopwatch, digit entry, format, ticker; 641 tests), Tauri 2.12 scaffold (`cargo check` clean), dev harness. Removed the `store` plugin from the plan; TinyBase holds all data.
+- 2026-10-18: M2 done. Material 3 timer and stopwatch cards, responsive grid with edit mode and drag or keyboard reorder, rebindable keymap and keyboard controller, command palette, cheat sheet, alarm orchestration (synthesized sounds, notifications, wake worker), fullscreen with overlay fallback, Playwright e2e (50 tests) in CI; 1371 unit tests. Card colors use palette tones instead of `surface-container`; the default theme is precomputed; build target raised to Chrome 105 / Safari 16.

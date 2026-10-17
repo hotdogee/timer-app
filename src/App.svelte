@@ -1,37 +1,69 @@
 <!--
-  Milestone 1 dev harness: one timer and one stopwatch driven by the core engine, with keyboard
-  digit entry. The designed Material 3 card replaces it in milestone 2.
+  The app: the card grid and its action bar, the undo snackbar, the live region, the keyboard
+  layer, the command palette and the shortcut cheat sheet. App owns the UI state that the keyboard
+  layer reads and writes (typed digits, the grid's column count, edit mode, rename, the "+ Timer"
+  menu, which dialog is open) and runs the frame loop, the per-frame settle and the alarm.
+
+  Every way of acting (buttons, keys, palette commands) changes cards through `cardStore`, and the
+  app follows the store: deletes leave `cardStore.lastRemoved`, which shows the undo snackbar and
+  is announced, and the other announcements are a diff of the card list. Starts from a key or a
+  command call `alarm.prime()` inside the gesture (`onStart`), as the Start buttons do, so audio
+  and notifications unlock.
+
+  While a card is fullscreen it follows the selection, so the keys always act on the card in view;
+  as the overlay (no Fullscreen API) everything else is inert, as native fullscreen makes it.
 -->
 <script lang="ts">
+  import { tick, untrack } from 'svelte'
+
+  import { cards, digits, keymap, type DigitBuffer } from './core'
+  import { FALLBACK_ATTRIBUTE, platform } from './platform'
+  import { createAlarm } from './state/alarm.svelte'
+  import { cardStore } from './state/cards.svelte'
   import {
-    digits,
-    stopwatch,
-    timer,
-    type EpochMs,
-    type Ms,
-    type StopwatchState,
-    type TimerState,
-  } from './core'
+    createKeyboardController,
+    detectKeyPlatform,
+    type AppActions,
+  } from './state/keyboard.svelte'
+  import { BUILTIN_PRESETS } from './state/presets'
+  import Announcer from './ui/Announcer.svelte'
+  import { announce } from './ui/announce.svelte'
   import { frameClock } from './ui/frame-clock.svelte'
-  import StopwatchCard from './ui/StopwatchCard.svelte'
-  import TimerCard from './ui/TimerCard.svelte'
+  import ActionBar from './ui/grid/ActionBar.svelte'
+  import { describeChanges } from './ui/grid/announcements'
+  import { cardElement } from './ui/grid/card-element'
+  import CardGrid from './ui/grid/CardGrid.svelte'
+  import EmptyState from './ui/grid/EmptyState.svelte'
+  import KeyboardHelp from './ui/KeyboardHelp.svelte'
+  import CommandPalette from './ui/palette/CommandPalette.svelte'
+  import { shortcutLabel } from './ui/palette/shortcuts'
+  import { Snackbar } from './ui/primitives'
 
-  /** The timer's first duration, as in the spec's idle example (`5:00`). */
-  const INITIAL_DURATION: Ms = 5 * 60_000
+  /** Digits typed for the selected timer (spec › Digit entry). The keyboard layer sets them. */
+  let typed = $state<DigitBuffer>(digits.EMPTY)
+  /** How many columns the grid shows, for up/down selection. Kept current by the grid. */
+  let columns = $state(1)
+  /** Edit mode (✎ or E): rename fields, delete buttons and drag handles on every card. */
+  let editing = $state(false)
+  /** The card whose name field is open outside edit mode (F2). */
+  let renamingId = $state<cards.CardId | null>(null)
+  /** The "+ Timer" menu (the Presets shortcut opens it). */
+  let timerMenuOpen = $state(false)
+  /** The command palette (Mod+K). */
+  let paletteOpen = $state(false)
+  /** The keyboard shortcut cheat sheet (?). */
+  let helpOpen = $state(false)
 
-  /** Exactly one ASCII digit: what `KeyboardEvent.key` reports for the digit row and the numpad. */
-  const DIGIT_KEY = /^[0-9]$/
+  /** The modifier convention for shortcuts and their labels (Cmd on Apple devices). */
+  const keyPlatform = detectKeyPlatform()
+  /** The shortcuts. Settings make them rebindable in M3. */
+  const bindings = keymap.DEFAULT_BINDINGS
 
-  // Engine states are immutable and replaced whole, so `$state.raw` is enough, and an action that
-  // returns the same object changes nothing.
-  let timerState = $state.raw(timer.createTimer(INITIAL_DURATION))
-  let stopwatchState = $state.raw(stopwatch.createStopwatch())
-  // Digits typed for the timer's next duration. Every timer action applies them first; Esc and
-  // Reset discard them. Typing is ignored while the timer runs, so they are empty while it runs.
-  let typed = $state(digits.EMPTY)
+  const selectedId = $derived(cardStore.list.selectedId)
 
-  // One frame loop for the page, running only while a display changes over time.
-  const animating = $derived(timer.needsFrames(timerState) || stopwatch.needsFrames(stopwatchState))
+  // ── Frame loop ─────────────────────────────────────────────────────────────────────────────
+  // One requestAnimationFrame loop for the page, running only while some display changes.
+  const animating = $derived(cards.anyNeedsFrames(cardStore.list))
   $effect(() => {
     if (!animating) return
     frameClock.setActive(true)
@@ -40,174 +72,283 @@
     }
   })
 
-  // Every frame: a running timer whose end has come starts ringing, dated from its real end.
+  // Every frame: timers whose end has come start ringing, dated from their real end. The store
+  // reads its list untracked, so this effect follows the clock only.
   $effect(() => {
-    const settled = timer.settle(timerState, frameClock.now)
-    if (settled !== timerState) timerState = settled
+    cardStore.settle(frameClock.now)
   })
 
-  /** Reads the clock for a user action, so the transition and every view use the same `now`. */
-  function actionTime(): EpochMs {
-    frameClock.bump()
-    return frameClock.now
-  }
+  // ── Alarm: sound, notifications, background wake-up ──────────────────────────────────────
+  const alarm = createAlarm(cardStore, platform)
+  $effect(() => () => {
+    alarm.destroy()
+  })
 
+  // ── Screen-reader announcements ───────────────────────────────────────────────────────────
+  let announcedList = untrack(() => cardStore.list)
+  /** A card being restored by undo, announced as "Restored …" rather than "Added …". */
+  let restoredId: cards.CardId | null = null
+  $effect(() => {
+    const list = cardStore.list
+    untrack(() => {
+      const messages = describeChanges(announcedList, list, restoredId)
+      announcedList = list
+      restoredId = null
+      if (messages.length > 0) announce(messages.join('. '))
+    })
+  })
+
+  // ── Undo delete ───────────────────────────────────────────────────────────────────────────
+  // Every delete (button, keyboard, palette) leaves `lastRemoved`; the snackbar follows it and
+  // forgets it when it times out, so Undo and Ctrl+Z work only while it shows (6 seconds). The
+  // delete is announced through the app's live region with the shortcut, which is the quick way
+  // to undo from the keyboard; the snackbar itself is not a live region.
+  const removed = $derived(cardStore.lastRemoved)
+  const undoKeys = shortcutLabel(bindings, 'undo', keyPlatform)
+  const undoHint = undoKeys === null ? '' : `Press ${undoKeys} to undo.`
+  let snackbarMessage = $state('')
+  let snackbarHost = $state<HTMLElement>()
+  $effect.pre(() => {
+    // Keep the last message while the snackbar slides out.
+    if (!removed) return
+    const message = `Deleted ${removed.card.name}`
+    snackbarMessage = message
+    untrack(() => {
+      announce(`${message}. ${undoHint}`)
+    })
+  })
+
+  // ── Fullscreen ─────────────────────────────────────────────────────────────────────────────
+  let fullscreenElement = $state<Element | null>(null)
+  $effect(() => {
+    fullscreenElement = platform.fullscreen.element
+    return platform.fullscreen.onChange((element) => {
+      fullscreenElement = element
+    })
+  })
+
+  /** The card shown as the overlay (no Fullscreen API), which makes everything else inert. */
+  const overlayId = $derived(
+    fullscreenElement?.hasAttribute(FALLBACK_ATTRIBUTE) === true
+      ? fullscreenElement.getAttribute('data-card-id')
+      : null,
+  )
+
+  // While a card is fullscreen, show the selected one: arrows, N and undo then act on the card in
+  // view. This runs within the key press's activation window, so the browser allows the switch.
+  $effect(() => {
+    const id = selectedId
+    const shownId = fullscreenElement?.getAttribute('data-card-id') ?? null
+    if (id === null || shownId === null || shownId === id) return
+    untrack(() => {
+      const element = cardElement(document, id)
+      if (element) void platform.fullscreen.enter(element)
+    })
+  })
+
+  // ── UI actions for the keyboard controller and the command palette ───────────────────────
   /**
-   * Runs a timer action at the current time. Typed digits are applied first as the new duration
-   * (which resets a paused or ringing timer; spec › Digit entry), so the action uses what is shown.
+   * Runs `change` (which may remove the focused control, such as a delete button or a name field
+   * when edit mode ends) and then, if focus fell to the page, gives it to the card it was in.
    */
-  function timerAction(action: (s: TimerState, now: EpochMs) => TimerState): void {
-    const now = actionTime()
-    const s = digits.isEmpty(typed)
-      ? timerState
-      : timer.setDuration(timerState, digits.toDurationMs(typed))
-    typed = digits.EMPTY
-    timerState = action(s, now)
+  function keepFocusInCard(change: () => void): void {
+    const owner = document.activeElement?.closest('[data-card-id]')
+    const id = owner?.getAttribute('data-card-id') ?? null
+    change()
+    if (id === null) return
+    void tick().then(() => {
+      const active = document.activeElement
+      if (active === null || active === document.body) cardElement(document, id)?.focus()
+    })
   }
 
-  function startTimer(): void {
-    timerAction(timer.start)
+  function toggleEditMode(): void {
+    keepFocusInCard(() => {
+      editing = !editing
+      renamingId = null
+    })
   }
 
-  function pauseTimer(): void {
-    timerAction(timer.pause)
+  function startRename(id: cards.CardId): void {
+    cardStore.select(id)
+    renamingId = id
   }
 
-  function toggleTimer(): void {
-    timerAction(timer.toggle)
+  function endRename(): void {
+    renamingId = null
   }
 
-  function dismissTimer(): void {
-    timerAction(timer.dismiss)
+  function toggleFullscreen(id: cards.CardId): void {
+    const element = cardElement(document, id)
+    if (element) void platform.fullscreen.toggle(element)
   }
 
-  function addTime(delta: Ms): void {
-    timerAction((s, now) => timer.addTime(s, delta, now))
+  function openPresets(): void {
+    timerMenuOpen = true
   }
 
-  /** Enter: starts; with nothing typed, dismisses a ringing timer instead (spec › Digit entry). */
-  function enter(): void {
-    timerAction((s, now) => (s.phase === 'ringing' ? timer.dismiss(s) : timer.start(s, now)))
-  }
-
-  /** Reset discards typed digits instead of applying them: it returns to the configured duration. */
-  function resetTimer(): void {
-    typed = digits.EMPTY
-    timerState = timer.reset(timerState)
-  }
-
-  function stopwatchAction(action: (s: StopwatchState, now: EpochMs) => StopwatchState): void {
-    stopwatchState = action(stopwatchState, actionTime())
-  }
-
-  function startStopwatch(): void {
-    stopwatchAction(stopwatch.start)
-  }
-
-  function pauseStopwatch(): void {
-    stopwatchAction(stopwatch.pause)
-  }
-
-  function lap(): void {
-    stopwatchAction(stopwatch.lap)
-  }
-
-  function resetStopwatch(): void {
-    stopwatchState = stopwatch.reset(stopwatchState)
-  }
-
-  /** Single-press shortcuts; a held key does not repeat them. */
-  function shortcut(key: string): (() => void) | undefined {
-    switch (key) {
-      case 'Enter':
-        return enter
-      case 'Escape':
-        return () => {
-          typed = digits.EMPTY
-        }
-      case ' ':
-        return toggleTimer
-      case 'r':
-      case 'R':
-        return resetTimer
-      case 'l':
-      case 'L':
-        return lap
-      default:
-        return undefined
+  /** Puts the last deleted card back, selected, and focuses it when focus had nowhere to be. */
+  function undoRemove(): void {
+    const last = cardStore.lastRemoved
+    if (last === null) return
+    const active = document.activeElement
+    const refocus =
+      active === null ||
+      active === document.body ||
+      snackbarHost?.contains(active) === true ||
+      active.closest('[data-card-id]') !== null ||
+      active.closest('[data-empty-state]') !== null
+    restoredId = last.card.id
+    if (!cardStore.undoRemove()) {
+      restoredId = null
+      return
+    }
+    if (refocus) {
+      void tick().then(() => {
+        cardElement(document, last.card.id)?.focus()
+      })
     }
   }
 
-  /** Whether `target` is a text field, which owns every key typed into it. */
-  function isTextEntry(target: EventTarget | null): boolean {
-    return (
-      target instanceof HTMLElement &&
-      (target.isContentEditable || target.matches('input, textarea, select'))
-    )
+  /** Esc after the keyboard layer cleared typed digits: close the rename field, else edit mode. */
+  function cancel(): void {
+    keepFocusInCard(() => {
+      if (renamingId !== null) renamingId = null
+      else if (editing) editing = false
+    })
   }
 
-  /** Whether `target` is a control that already acts on Space and Enter, such as a button. */
-  function isActivatable(target: EventTarget | null): boolean {
-    return target instanceof Element && target.closest('button, a[href], summary') !== null
+  /** Opens the command palette; one dialog or menu at a time. */
+  function openPalette(): void {
+    timerMenuOpen = false
+    helpOpen = false
+    paletteOpen = true
   }
 
-  function onKeydown(event: KeyboardEvent): void {
-    // Keys with Ctrl, Alt or Meta are browser and OS shortcuts (Ctrl+R reloads). Shift is allowed:
-    // `key` already includes it, and some layouts (AZERTY) need it to type digits.
-    if (event.ctrlKey || event.altKey || event.metaKey) return
-    if (event.defaultPrevented || event.isComposing || isTextEntry(event.target)) return
-    const { key } = event
-    // A focused button acts on Space and Enter itself; acting here as well would act twice.
-    if ((key === ' ' || key === 'Enter') && isActivatable(event.target)) return
-
-    if (DIGIT_KEY.test(key)) {
-      // Digits edit the timer only while it is not running (spec › Digit entry).
-      if (timerState.phase === 'running') return
-      typed = digits.pushDigit(typed, key)
-    } else if (key === 'Backspace') {
-      typed = digits.popDigit(typed)
-    } else {
-      const action = shortcut(key)
-      if (action === undefined) return
-      if (!event.repeat) action()
-    }
-    event.preventDefault()
+  /** Opens the shortcut cheat sheet (also from the palette, which closes itself first). */
+  function openHelp(): void {
+    timerMenuOpen = false
+    paletteOpen = false
+    helpOpen = true
   }
+
+  /** Inside a key press or command that started a timer: unlock audio, ask for notifications. */
+  function onStart(): void {
+    alarm.prime()
+  }
+
+  /** Hands over the typed digits for one action and clears them (the palette's Start/Pause). */
+  function takeTyped(): DigitBuffer {
+    const buffer = typed
+    typed = digits.EMPTY
+    return buffer
+  }
+
+  /** The UI actions the keyboard layer and the palette need beyond the card store. */
+  const actions: AppActions = {
+    openPalette,
+    openHelp,
+    toggleEditMode,
+    startRename,
+    toggleFullscreen,
+    miniWindow: () => {
+      // Always-on-top mini window: desktop milestone (M5).
+    },
+    openPresets,
+    undoRemove,
+    cancel,
+  }
+
+  // ── Keyboard layer ───────────────────────────────────────────────────────────────────────
+  // It also drops typed digits when the selection or the selected card's phase changes.
+  const keyboard = createKeyboardController({
+    cardStore,
+    platform: keyPlatform,
+    bindings,
+    getColumns: () => columns,
+    getTyped: () => typed,
+    setTyped: (buffer) => {
+      typed = buffer
+    },
+    actions,
+    onStart,
+  })
+  $effect(() => () => {
+    keyboard.destroy()
+  })
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={keyboard.handleKeydown} />
 
-<main>
-  <h1>Timer App <small>dev harness</small></h1>
-
-  <div class="cards">
-    <TimerCard
-      state={timerState}
-      now={frameClock.now}
+<main class="app">
+  <h1 class="visually-hidden">Timer App</h1>
+  {#if cardStore.cards.length > 0}
+    <CardGrid
       {typed}
-      onstart={startTimer}
-      onpause={pauseTimer}
-      onreset={resetTimer}
-      ondismiss={dismissTimer}
-      onadd={addTime}
+      ontyped={(buffer: DigitBuffer) => {
+        typed = buffer
+      }}
+      {editing}
+      {renamingId}
+      onrenameend={endRename}
+      onstart={onStart}
+      isolate={overlayId}
+      bind:columns
     />
-    <StopwatchCard
-      state={stopwatchState}
-      now={frameClock.now}
-      onstart={startStopwatch}
-      onpause={pauseStopwatch}
-      onreset={resetStopwatch}
-      onlap={lap}
-    />
-  </div>
+  {:else}
+    <EmptyState />
+  {/if}
 
-  <ul class="keys" aria-label="Keyboard shortcuts">
-    <li><kbd>0</kbd>–<kbd>9</kbd> type a timer duration</li>
-    <li><kbd>Backspace</kbd> delete a digit</li>
-    <li><kbd>Esc</kbd> cancel typing</li>
-    <li><kbd>Enter</kbd> start or dismiss</li>
-    <li><kbd>Space</kbd> start or pause the timer</li>
-    <li><kbd>R</kbd> reset the timer</li>
-    <li><kbd>L</kbd> lap the stopwatch</li>
-  </ul>
+  <!-- Floating UI, inside the main landmark; out of reach under the fullscreen overlay. -->
+  <div class="floating" inert={overlayId !== null}>
+    <ActionBar {editing} ontoggleedit={toggleEditMode} bind:menuOpen={timerMenuOpen} />
+
+    <div class="snackbar-host" bind:this={snackbarHost}>
+      <Snackbar
+        open={removed !== null}
+        message={snackbarMessage}
+        hint={undoHint}
+        live={false}
+        actionLabel="Undo"
+        onaction={undoRemove}
+        key={removed}
+        onclose={(reason: 'timeout' | 'action') => {
+          if (reason === 'timeout') cardStore.forgetRemoved()
+        }}
+      />
+    </div>
+  </div>
 </main>
+
+<Announcer />
+
+<CommandPalette
+  bind:open={paletteOpen}
+  context={{ cardStore, actions, presets: BUILTIN_PRESETS, editing, onStart, takeTyped }}
+  {bindings}
+  platform={keyPlatform}
+/>
+<KeyboardHelp bind:open={helpOpen} {bindings} platform={keyPlatform} />
+
+<style>
+  .app {
+    padding: var(--space-4, 1rem);
+    /* Room for the floating action bar under the last row. */
+    padding-block-end: calc(var(--space-4, 1rem) * 2 + 3.5rem);
+  }
+
+  .floating {
+    display: contents;
+  }
+
+  .snackbar-host {
+    --snackbar-offset: var(--space-4, 1rem);
+  }
+
+  /* On narrow screens the snackbar would cover the action bar: lift it above. */
+  @media (max-width: 37.5rem) {
+    .snackbar-host {
+      --snackbar-offset: calc(var(--space-4, 1rem) + 4rem);
+    }
+  }
+</style>

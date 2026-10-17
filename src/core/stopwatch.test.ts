@@ -7,6 +7,7 @@ import {
   elapsed,
   lap,
   lapDurations,
+  lapRows,
   needsFrames,
   pause,
   reset,
@@ -324,6 +325,37 @@ describe('lapDurations', () => {
 
   it('works the same while running', () => {
     expect(lapDurations(running)).toStrictEqual([2 * SECOND])
+  })
+})
+
+describe('lapRows', () => {
+  function withLaps(at: readonly number[]): StopwatchState {
+    let s = start(createStopwatch(), 0)
+    for (const t of at) s = lap(s, t)
+    return s
+  }
+
+  it('is empty for an idle stopwatch and before the first lap', () => {
+    expect(lapRows(createStopwatch())).toEqual([])
+    expect(lapRows(withLaps([]))).toEqual([])
+  })
+
+  it('lists laps newest first with lap number, length and split', () => {
+    expect(lapRows(withLaps([1_000, 2_500, 6_000]))).toEqual([
+      { lap: 3, duration: 3_500, split: 6_000 },
+      { lap: 2, duration: 1_500, split: 2_500 },
+      { lap: 1, duration: 1_000, split: 1_000 },
+    ])
+  })
+
+  it('keeps the laps of a paused stopwatch', () => {
+    const paused = pause(withLaps([1_000]), 5_000)
+    expect(lapRows(paused)).toEqual([{ lap: 1, duration: 1_000, split: 1_000 }])
+  })
+
+  it('lap lengths sum to the last split', () => {
+    const rows = lapRows(withLaps([700, 1_900, 1_900, 9_999]))
+    expect(rows.reduce((sum, row) => sum + row.duration, 0)).toBe(9_999)
   })
 })
 

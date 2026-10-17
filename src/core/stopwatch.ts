@@ -114,6 +114,30 @@ export function lapDurations(s: StopwatchState): readonly Ms[] {
   return s.laps.map((split, i, splits) => split - (splits[i - 1] ?? 0))
 }
 
+/** One recorded lap as a laps list shows it. */
+export interface LapRow {
+  /** 1 for the first lap. */
+  readonly lap: number
+  /** Length of this lap. */
+  readonly duration: Ms
+  /** Total elapsed time when the lap was recorded. */
+  readonly split: Ms
+}
+
+/**
+ * The recorded laps, newest first, each with its number, its length ({@link lapDurations}) and
+ * its split. Idle, or no laps yet, returns a new empty array.
+ */
+export function lapRows(s: StopwatchState): readonly LapRow[] {
+  if (s.phase === 'idle') return []
+  const durations = lapDurations(s)
+  const rows: LapRow[] = []
+  for (let i = s.laps.length - 1; i >= 0; i--) {
+    rows.push({ lap: i + 1, duration: durations[i] ?? 0, split: s.laps[i] ?? 0 })
+  }
+  return rows
+}
+
 /**
  * Time in the lap in progress at `now`: elapsed time minus the last split (or all of the elapsed
  * time before the first lap). Idle is 0.
