@@ -12,8 +12,10 @@
 -->
 <script lang="ts">
   import { keymap } from '../core'
+  import { m } from '../i18n'
   import { detectKeyPlatform } from '../state/keyboard.svelte'
   import Announcer from './Announcer.svelte'
+  import KeyLabel from './KeyLabel.svelte'
   import { helpSections } from './palette/shortcuts'
   import Dialog from './primitives/Dialog.svelte'
   import IconButton from './primitives/IconButton.svelte'
@@ -40,7 +42,10 @@
 
   function handleKeydown(event: KeyboardEvent): void {
     // The help shortcut toggles the sheet, like the palette shortcut toggles the palette.
-    if (event.isComposing || keymap.resolveAction(bindings, event, platform) !== 'help') return
+    if (event.isComposing) return
+    if (keymap.resolveAction(bindings, keymap.keyEventForMatching(event), platform) !== 'help') {
+      return
+    }
     event.preventDefault()
     event.stopPropagation()
     open = false
@@ -54,11 +59,11 @@
   onkeydown={handleKeydown}
 >
   <div class="header">
-    <h2 id={headingId}>Keyboard shortcuts</h2>
+    <h2 id={headingId}>{m.help_title()}</h2>
     <!-- Focus starts on a named control, not on the scrolling content. -->
     <IconButton
       icon="close"
-      label="Close"
+      label={m.common_close()}
       autofocus
       onclick={() => {
         open = false
@@ -75,7 +80,7 @@
               <dt>{row.label}</dt>
               <dd>
                 {#if row.modifier}<kbd>{row.modifier}</kbd><span class="plus">+</span>{/if}
-                {#each row.keys as key, k (k)}<kbd>{key}</kbd>{/each}
+                {#each row.keys as key, k (k)}<kbd><KeyLabel label={key} /></kbd>{/each}
               </dd>
             </div>
           {/each}

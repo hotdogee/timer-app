@@ -1,14 +1,23 @@
 <!--
-  The app: the card grid and its action bar, the undo snackbar, the live region, the keyboard
-  layer, the command palette and the shortcut cheat sheet. App owns the UI state that the keyboard
-  layer reads and writes (typed digits, the grid's column count, edit mode, rename, the "+ Timer"
-  menu, which dialog is open) and runs the frame loop, the per-frame settle and the alarm.
+  The app: the card grid and its action bar, the undo and update snackbars, the live region, the
+  keyboard layer, the command palette, the shortcut cheat sheet, the settings dialog and the
+  confirm-delete dialog. App
+  owns the UI state that the keyboard layer reads and writes (typed digits, the grid's column
+  count, edit mode, rename, the "+ Timer" menu, which dialog is open) and runs the frame loop, the
+  per-frame settle and the alarm.
+
+  Settings apply live: the appearance (theme, seed, font, sizes, density) and the language follow
+  `settingsStore.device` through effects; the alarm, the shortcuts and the cards read
+  `settingsStore.synced`; the "+ Timer" menu and the palette list `presetStore.presets`. The data
+  is loaded before mount (main.ts); Settings › Data exports it to a file and imports one through
+  `appData.replaceAll`.
 
   Every way of acting (buttons, keys, palette commands) changes cards through `cardStore`, and the
   app follows the store: deletes leave `cardStore.lastRemoved`, which shows the undo snackbar and
-  is announced, and the other announcements are a diff of the card list. Starts from a key or a
-  command call `alarm.prime()` inside the gesture (`onStart`), as the Start buttons do, so audio
-  and notifications unlock.
+  is announced, and the other announcements are a diff of the card list. Every delete (key,
+  button, palette) goes through `deleteCard`, which asks first when "Confirm before delete" is on.
+  Starts from a key or a command call `alarm.prime()` inside the gesture (`onStart`), as the Start
+  buttons do, so audio and notifications unlock.
 
   While a card is fullscreen it follows the selection, so the keys always act on the card in view;
   as the overlay (no Fullscreen API) everything else is inert, as native fullscreen makes it.
@@ -16,28 +25,42 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
 
-  import { cards, digits, keymap, type DigitBuffer } from './core'
+  import { cards, digits, exportFormat, type DigitBuffer } from './core'
+  import { applyLocaleSetting, m } from './i18n'
   import { FALLBACK_ATTRIBUTE, platform } from './platform'
+  import { applyUpdate, dismissOfflineReady, dismissUpdate, pwaState } from './pwa.svelte'
   import { createAlarm } from './state/alarm.svelte'
+  import type { AppData } from './state/app-data.svelte'
   import { cardStore } from './state/cards.svelte'
   import {
     createKeyboardController,
     detectKeyPlatform,
     type AppActions,
   } from './state/keyboard.svelte'
-  import { BUILTIN_PRESETS } from './state/presets'
+  import { presetStore } from './state/presets.svelte'
+  import { settingsStore } from './state/settings.svelte'
   import Announcer from './ui/Announcer.svelte'
   import { announce } from './ui/announce.svelte'
+  import ConfirmDialog from './ui/ConfirmDialog.svelte'
   import { frameClock } from './ui/frame-clock.svelte'
   import ActionBar from './ui/grid/ActionBar.svelte'
-  import { describeChanges } from './ui/grid/announcements'
+  import { describeChanges, joinAnnouncements } from './ui/grid/announcements'
   import { cardElement } from './ui/grid/card-element'
   import CardGrid from './ui/grid/CardGrid.svelte'
   import EmptyState from './ui/grid/EmptyState.svelte'
   import KeyboardHelp from './ui/KeyboardHelp.svelte'
   import CommandPalette from './ui/palette/CommandPalette.svelte'
   import { shortcutLabel } from './ui/palette/shortcuts'
-  import { Snackbar } from './ui/primitives'
+  import Snackbar from './ui/primitives/Snackbar.svelte'
+  import type * as SettingsUi from './ui/settings'
+  import { applyAppearance } from './ui/theme/apply'
+
+  interface Props {
+    /** The loaded app data (`startAppData`, in main.ts); Import replaces it. */
+    appData: Pick<AppData, 'replaceAll'>
+  }
+
+  let { appData }: Props = $props()
 
   /** Digits typed for the selected timer (spec › Digit entry). The keyboard layer sets them. */
   let typed = $state<DigitBuffer>(digits.EMPTY)
@@ -53,13 +76,37 @@
   let paletteOpen = $state(false)
   /** The keyboard shortcut cheat sheet (?). */
   let helpOpen = $state(false)
+  /** The settings dialog (⚙, Mod+, or the palette). */
+  let settingsOpen = $state(false)
+  /**
+   * The settings dialog's code (with its controls, about 20 kB gzip), loaded the first time it
+   * opens, since startup does not need it. Once loaded it stays mounted (it renders nothing while
+   * closed), so it reopens on the last section shown.
+   */
+  let settingsUi = $state.raw<typeof SettingsUi | null>(null)
+  let settingsLoading = false
+  /** The card waiting for "Delete …?" to be answered (Confirm before delete). */
+  let pendingDelete = $state.raw<{ readonly id: cards.CardId; readonly name: string } | null>(null)
+  let confirmOpen = $state(false)
 
   /** The modifier convention for shortcuts and their labels (Cmd on Apple devices). */
   const keyPlatform = detectKeyPlatform()
-  /** The shortcuts. Settings make them rebindable in M3. */
-  const bindings = keymap.DEFAULT_BINDINGS
+  /** The shortcuts: the defaults with the user's rebindings. Stable while the keymap is. */
+  const bindings = $derived(settingsStore.bindings)
+  /** Durations in the palette follow the time style setting. */
+  const timeStyle = $derived(settingsStore.synced.timeStyle)
 
   const selectedId = $derived(cardStore.list.selectedId)
+
+  // ── Appearance and language ─────────────────────────────────────────────────────────────
+  // Startup (main.ts) applies both before mounting; these keep them in step with the settings,
+  // from this tab, another tab or an import. Both write only what changed.
+  $effect(() => {
+    void applyAppearance(settingsStore.device)
+  })
+  $effect(() => {
+    applyLocaleSetting(settingsStore.device.locale)
+  })
 
   // ── Frame loop ─────────────────────────────────────────────────────────────────────────────
   // One requestAnimationFrame loop for the page, running only while some display changes.
@@ -79,7 +126,8 @@
   })
 
   // ── Alarm: sound, notifications, background wake-up ──────────────────────────────────────
-  const alarm = createAlarm(cardStore, platform)
+  // It reads the sound, volume, loop, auto-stop and notification settings live.
+  const alarm = createAlarm(cardStore, platform, { settings: () => settingsStore.synced })
   $effect(() => () => {
     alarm.destroy()
   })
@@ -94,7 +142,7 @@
       const messages = describeChanges(announcedList, list, restoredId)
       announcedList = list
       restoredId = null
-      if (messages.length > 0) announce(messages.join('. '))
+      if (messages.length > 0) announce(joinAnnouncements(messages))
     })
   })
 
@@ -104,17 +152,18 @@
   // delete is announced through the app's live region with the shortcut, which is the quick way
   // to undo from the keyboard; the snackbar itself is not a live region.
   const removed = $derived(cardStore.lastRemoved)
-  const undoKeys = shortcutLabel(bindings, 'undo', keyPlatform)
-  const undoHint = undoKeys === null ? '' : `Press ${undoKeys} to undo.`
-  let snackbarMessage = $state('')
+  const undoKeys = $derived(shortcutLabel(bindings, 'undo', keyPlatform))
+  const undoHint = $derived(undoKeys === null ? '' : m.delete_undo_hint({ keys: undoKeys }))
+  /** The deleted card's name; kept while the snackbar slides out. */
+  let removedName = $state('')
+  const snackbarMessage = $derived(m.delete_snackbar({ name: removedName }))
   let snackbarHost = $state<HTMLElement>()
   $effect.pre(() => {
     // Keep the last message while the snackbar slides out.
     if (!removed) return
-    const message = `Deleted ${removed.card.name}`
-    snackbarMessage = message
+    removedName = removed.card.name
     untrack(() => {
-      announce(`${message}. ${undoHint}`)
+      announce(m.announce_then({ first: snackbarMessage, next: undoHint }))
     })
   })
 
@@ -218,18 +267,71 @@
     })
   }
 
+  /** Closes every dialog and menu, so the next one opens alone. */
+  function closeOverlays(): void {
+    timerMenuOpen = false
+    paletteOpen = false
+    helpOpen = false
+    settingsOpen = false
+  }
+
   /** Opens the command palette; one dialog or menu at a time. */
   function openPalette(): void {
-    timerMenuOpen = false
-    helpOpen = false
+    closeOverlays()
     paletteOpen = true
   }
 
   /** Opens the shortcut cheat sheet (also from the palette, which closes itself first). */
   function openHelp(): void {
-    timerMenuOpen = false
-    paletteOpen = false
+    closeOverlays()
     helpOpen = true
+  }
+
+  /** Opens the settings dialog (⚙, Mod+, or the palette), loading it the first time. */
+  function openSettings(): void {
+    closeOverlays()
+    settingsOpen = true
+    if (settingsUi !== null || settingsLoading) return
+    settingsLoading = true
+    import('./ui/settings').then(
+      (module) => {
+        settingsUi = module
+      },
+      (error: unknown) => {
+        // Offline before the app was cached, say. The next try loads it again.
+        console.warn('Timer App: could not load the settings', error)
+        settingsOpen = false
+        settingsLoading = false
+      },
+    )
+  }
+
+  // ── Delete, with "Confirm before delete" ─────────────────────────────────────────────────
+  /**
+   * Deletes card `id` (the Delete key, a card's delete button, the palette), first asking
+   * "Delete …?" when the setting is on. Either way the undo snackbar follows the delete.
+   */
+  function deleteCard(id: cards.CardId): void {
+    const card = untrack(() => cards.findCard(cardStore.list, id))
+    if (card === undefined) return
+    if (!untrack(() => settingsStore.synced.confirmDelete)) {
+      cardStore.remove(id)
+      return
+    }
+    closeOverlays()
+    pendingDelete = { id, name: card.name }
+    confirmOpen = true
+  }
+
+  /** "Delete" in the confirm dialog: the dialog has closed and focus is back on the opener. */
+  function confirmDelete(): void {
+    const pending = pendingDelete
+    pendingDelete = null
+    if (pending !== null) cardStore.remove(pending.id)
+  }
+
+  function cancelDelete(): void {
+    pendingDelete = null
   }
 
   /** Inside a key press or command that started a timer: unlock audio, ask for notifications. */
@@ -248,6 +350,7 @@
   const actions: AppActions = {
     openPalette,
     openHelp,
+    openSettings,
     toggleEditMode,
     startRename,
     toggleFullscreen,
@@ -255,16 +358,20 @@
       // Always-on-top mini window: desktop milestone (M5).
     },
     openPresets,
+    deleteCard,
     undoRemove,
     cancel,
   }
 
   // ── Keyboard layer ───────────────────────────────────────────────────────────────────────
-  // It also drops typed digits when the selection or the selected card's phase changes.
+  // It also drops typed digits when the selection or the selected card's phase changes. It reads
+  // the bindings on every key press, so rebinding applies at once.
   const keyboard = createKeyboardController({
     cardStore,
     platform: keyPlatform,
-    bindings,
+    get bindings() {
+      return settingsStore.bindings
+    },
     getColumns: () => columns,
     getTyped: () => typed,
     setTyped: (buffer) => {
@@ -276,12 +383,63 @@
   $effect(() => () => {
     keyboard.destroy()
   })
+
+  // ── PWA: "Update ready" and "Ready to work offline" ──────────────────────────────────────
+  // One snackbar at a time: these wait while the undo snackbar shows, and while a dialog is open
+  // (the modal makes the page, the snackbar included, inert and silent). An update stays offered
+  // until Reload or Later, so keyboard and screen-reader users can reach it; Later waits for the
+  // next one. The offline note is brief and has no action.
+  const OFFLINE_TIMEOUT_MS = 4_000
+  /** Which note the snackbar shows; kept while it slides out. */
+  let pwaNotice = $state<'update' | 'offline'>('offline')
+  $effect.pre(() => {
+    if (pwaState.updateReady) pwaNotice = 'update'
+    else if (pwaState.offlineReady) pwaNotice = 'offline'
+  })
+  const dialogOpen = $derived(paletteOpen || helpOpen || settingsOpen || confirmOpen)
+  const pwaOpen = $derived(
+    (pwaState.updateReady || pwaState.offlineReady) && removed === null && !dialogOpen,
+  )
+  const pwaUpdate = $derived(pwaNotice === 'update')
+  const pwaMessage = $derived(pwaUpdate ? m.pwa_update_ready() : m.pwa_offline_ready())
+
+  /** Later, Reload (the page reloads into the new version) or the offline note timed out. */
+  function closePwaSnackbar(): void {
+    if (pwaUpdate) dismissUpdate()
+    else dismissOfflineReady()
+  }
+
+  // ── Settings › Data: export and import ──────────────────────────────────────────────────
+  /** Saves cards, presets and both settings groups as `timer-app-YYYY-MM-DD.json`. */
+  function exportData(ui: typeof SettingsUi): void {
+    ui.downloadExport(
+      exportFormat.createExport({
+        exportedAt: Date.now(),
+        cards: cardStore.cards,
+        presets: presetStore.presets,
+        settings: { synced: settingsStore.synced, device: settingsStore.device },
+      }),
+    )
+  }
+
+  /**
+   * Replaces everything with a validated import file's data, once the user agreed: the cards are
+   * settled at the current time, and the device settings in the file apply here too.
+   */
+  function importData(data: exportFormat.ExportData): void {
+    typed = digits.EMPTY
+    renamingId = null
+    appData.replaceAll(data)
+    // The cards are replaced by now. Settings › Data announces the import itself; a diff of every
+    // card ("Added …" for each) would only repeat it at length.
+    announcedList = untrack(() => cardStore.list)
+  }
 </script>
 
 <svelte:window onkeydown={keyboard.handleKeydown} />
 
 <main class="app">
-  <h1 class="visually-hidden">Timer App</h1>
+  <h1 class="visually-hidden">{m.app_name()}</h1>
   {#if cardStore.cards.length > 0}
     <CardGrid
       {typed}
@@ -291,6 +449,7 @@
       {editing}
       {renamingId}
       onrenameend={endRename}
+      ondelete={deleteCard}
       onstart={onStart}
       isolate={overlayId}
       bind:columns
@@ -301,7 +460,12 @@
 
   <!-- Floating UI, inside the main landmark; out of reach under the fullscreen overlay. -->
   <div class="floating" inert={overlayId !== null}>
-    <ActionBar {editing} ontoggleedit={toggleEditMode} bind:menuOpen={timerMenuOpen} />
+    <ActionBar
+      {editing}
+      ontoggleedit={toggleEditMode}
+      onopensettings={openSettings}
+      bind:menuOpen={timerMenuOpen}
+    />
 
     <div class="snackbar-host" bind:this={snackbarHost}>
       <Snackbar
@@ -309,12 +473,24 @@
         message={snackbarMessage}
         hint={undoHint}
         live={false}
-        actionLabel="Undo"
+        actionLabel={m.delete_undo()}
         onaction={undoRemove}
         key={removed}
-        onclose={(reason: 'timeout' | 'action') => {
+        onclose={(reason: 'timeout' | 'action' | 'dismiss') => {
           if (reason === 'timeout') cardStore.forgetRemoved()
         }}
+      />
+      <Snackbar
+        open={pwaOpen}
+        message={pwaMessage}
+        actionLabel={pwaUpdate ? m.pwa_reload() : ''}
+        onaction={() => {
+          void applyUpdate()
+        }}
+        dismissLabel={pwaUpdate ? m.pwa_later() : ''}
+        timeout={pwaUpdate ? 0 : OFFLINE_TIMEOUT_MS}
+        key={pwaNotice}
+        onclose={closePwaSnackbar}
       />
     </div>
   </div>
@@ -324,11 +500,41 @@
 
 <CommandPalette
   bind:open={paletteOpen}
-  context={{ cardStore, actions, presets: BUILTIN_PRESETS, editing, onStart, takeTyped }}
+  context={{
+    cardStore,
+    actions,
+    presets: presetStore.presets,
+    editing,
+    timeStyle,
+    onStart,
+    takeTyped,
+  }}
   {bindings}
   platform={keyPlatform}
 />
 <KeyboardHelp bind:open={helpOpen} {bindings} platform={keyPlatform} />
+<ConfirmDialog
+  bind:open={confirmOpen}
+  title={m.confirm_delete_title({ name: pendingDelete?.name ?? '' })}
+  confirmLabel={m.confirm_delete_confirm()}
+  cancelLabel={m.confirm_delete_cancel()}
+  onconfirm={confirmDelete}
+  oncancel={cancelDelete}
+/>
+{#if settingsUi !== null}
+  {@const ui = settingsUi}
+  <ui.SettingsDialog
+    bind:open={settingsOpen}
+    {settingsStore}
+    {presetStore}
+    cardCount={cardStore.cards.length}
+    onexport={() => {
+      exportData(ui)
+    }}
+    onimport={importData}
+    {keyPlatform}
+  />
+{/if}
 
 <style>
   .app {

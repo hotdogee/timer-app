@@ -44,6 +44,7 @@
     renaming,
     inert = false,
     onrenameend,
+    ondelete,
     ondragstart,
     onstep,
     face,
@@ -173,6 +174,7 @@
       {fullscreen}
       ontogglefullscreen={toggleFullscreen}
       onrenameend={endRename}
+      {ondelete}
       {ondragstart}
       {onstep}
     />
@@ -223,7 +225,8 @@
     flex-direction: column;
     aspect-ratio: 3 / 2;
     min-block-size: 0;
-    padding: clamp(0.625rem, 1.85cqw, 1.75rem);
+    /* Density: tokens.css (compact tightens it). */
+    padding: var(--card-padding, clamp(0.625rem, 1.85cqw, 1.75rem));
     --button-height: clamp(2.75rem, 6.75cqw, 5rem);
     --button-icon-size: clamp(1.125rem, 2.8cqw, 2.25rem);
     --button-font-size: clamp(0.875rem, 2.15cqw, 1.5rem);

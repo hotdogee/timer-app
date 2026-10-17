@@ -20,6 +20,8 @@ export default defineConfig({
   reporter: ci ? [['github'], ['list']] : 'list',
   use: {
     baseURL,
+    // The app follows the browser's language; the specs read English unless they choose another.
+    locale: 'en-US',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

@@ -2,10 +2,11 @@
  * The keyboard controller: turns key presses into card actions (spec.md › Keyboard). Digits and
  * Backspace edit the selected timer's typed duration; every other key goes through the rebindable
  * keymap (`core/keymap.ts`) to an action, which runs on the card store or, for UI-only actions
- * (dialogs, edit mode, rename, fullscreen), on the app through {@link AppActions}.
+ * (dialogs, settings, edit mode, rename, fullscreen) and deleting (which may ask first), on the
+ * app through {@link AppActions}.
  *
  * Keys are ignored while focus is in a text field, while a dialog is open (the dialog owns the
- * keyboard, Esc included), during IME composition, and when another handler already called
+ * keyboard, Esc included; a dialog that has just closed no longer counts), during IME composition, and when another handler already called
  * `preventDefault`. A focused button keeps Space and Enter, and a focused slider keeps the arrows.
  * Modifiers must match a binding exactly, so Ctrl+R still reloads the page. Held keys repeat only
  * digits, Backspace and the arrow actions.
@@ -35,6 +36,8 @@ export interface AppActions {
   openPalette(): void
   /** Opens the keyboard shortcut cheat sheet. */
   openHelp(): void
+  /** Opens the settings dialog. */
+  openSettings(): void
   /** Turns edit mode on or off. */
   toggleEditMode(): void
   /** Starts renaming card `id` (its name becomes a text field). */
@@ -45,6 +48,11 @@ export interface AppActions {
   miniWindow(id: cards.CardId): void
   /** Opens the timer presets (the action bar's "+ Timer" menu). */
   openPresets(): void
+  /**
+   * Deletes card `id`, or first asks whether to when the confirm-delete setting is on. The delete
+   * itself goes through the card store, which keeps the card for undo.
+   */
+  deleteCard(id: cards.CardId): void
   /** Undoes the last delete, while its snackbar is visible. */
   undoRemove(): void
   /** Esc with nothing typed: closes what is open or leaves edit mode. */
@@ -56,7 +64,10 @@ export interface KeyboardDeps {
   readonly cardStore: CardStore
   /** The modifier convention: `'mac'` reads `Mod` as Cmd. See {@link detectKeyPlatform}. */
   readonly platform: keymap.Platform
-  /** The shortcuts. Read on every key press, so a getter here can supply live settings. */
+  /**
+   * The shortcuts. Read on every key press, so a getter here supplies live settings (the app
+   * passes `get bindings() { return settingsStore.bindings }`).
+   */
   readonly bindings: keymap.Bindings
   /** The number of grid columns now, for the up and down arrows. */
   readonly getColumns: () => number
@@ -218,11 +229,15 @@ export function ownsArrows(target: unknown): boolean {
   return ARROW_ROLES.has(attribute(el, 'role') ?? '')
 }
 
-/** Whether `target` is a `<dialog>` or inside one. */
+/**
+ * Whether `target` is an open `<dialog>` or inside one. A closed dialog does not count: right
+ * after a dialog opened from the page closes, focus can still be on a control inside it for a
+ * frame, and the next key press belongs to the page.
+ */
 export function insideDialog(target: unknown): boolean {
   let el = asElement(target)
   for (let depth = 0; el !== null && depth < MAX_DEPTH; depth++) {
-    if (tagOf(el) === 'DIALOG') return true
+    if (tagOf(el) === 'DIALOG') return attribute(el, 'open') !== null
     el = asElement(el.parentElement)
   }
   return false
@@ -378,7 +393,7 @@ export function createKeyboardController(deps: KeyboardDeps): KeyboardController
         store.addStopwatch()
         break
       case 'deleteCard':
-        if (card !== undefined) store.remove(card.id)
+        if (card !== undefined) deps.actions.deleteCard(card.id)
         break
       case 'undo':
         deps.actions.undoRemove()
@@ -407,6 +422,9 @@ export function createKeyboardController(deps: KeyboardDeps): KeyboardController
       case 'help':
         deps.actions.openHelp()
         break
+      case 'settings':
+        deps.actions.openSettings()
+        break
       case 'selectLeft':
       case 'selectRight':
       case 'selectUp':
@@ -426,20 +444,6 @@ export function createKeyboardController(deps: KeyboardDeps): KeyboardController
     }
   }
 
-  /** The event as the keymap should read it: AltGr (reported as Ctrl+Alt) is not a modifier. */
-  function keyEvent(event: KeyboardEventLike): keymap.KeyEventLike {
-    if (!event.ctrlKey || !event.altKey || event.getModifierState?.('AltGraph') !== true) {
-      return event
-    }
-    return {
-      key: event.key,
-      ctrlKey: false,
-      altKey: false,
-      shiftKey: event.shiftKey,
-      metaKey: false,
-    }
-  }
-
   const handleKeydown = (event: KeyboardEventLike): void => {
     if (event.defaultPrevented || event.isComposing === true || IME_KEYS.has(event.key)) return
     if (dialogOpen() || insideDialog(event.target) || isTextEntry(event.target)) return
@@ -455,7 +459,12 @@ export function createKeyboardController(deps: KeyboardDeps): KeyboardController
     if ((pressed === ' ' || pressed === 'Enter') && isActivatable(event.target)) return
     if (ARROW_KEYS.has(pressed) && ownsArrows(event.target)) return
 
-    const action = keymap.resolveAction(deps.bindings, keyEvent(event), deps.platform)
+    // AltGr (reported as Ctrl+Alt) is not a modifier: the character it types is the key.
+    const action = keymap.resolveAction(
+      deps.bindings,
+      keymap.keyEventForMatching(event),
+      deps.platform,
+    )
     if (action === null) return
     // The key is ours even when held, so a held Space does not scroll the page.
     event.preventDefault()

@@ -27,6 +27,13 @@ const REQUIRED: readonly IconName[] = [
   'undo',
   'more_vert',
   'done',
+  // M3: the action bar's and the palette's Settings.
+  'settings',
+  // M3: the arrow keys on key caps, and reordering presets.
+  'arrow_back',
+  'arrow_forward',
+  'arrow_upward',
+  'arrow_downward',
 ]
 
 describe('icons', () => {

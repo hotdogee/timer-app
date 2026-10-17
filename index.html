@@ -4,10 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <script>
+      // Before the first paint: a theme mode forced in Settings (light or dark), read from the
+      // device settings that the app saves in localStorage (TinyBase's [tables, values] JSON).
+      // The app applies every appearance setting once it starts; this only keeps the page from
+      // showing the system's scheme for a frame first.
+      try {
+        var mode = JSON.parse(localStorage.getItem('timer-app-device'))[1].themeMode
+        if (mode === 'light' || mode === 'dark') {
+          document.documentElement.setAttribute('data-theme', mode)
+        }
+      } catch (error) {
+        // Nothing saved, or storage blocked: the system's scheme is right.
+      }
+    </script>
     <!-- Page colors of the default theme (--app-background); applyTheme() updates them for another seed. -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ededf7" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#21232b" />
     <meta name="description" content="Timers and stopwatches, keyboard first." />
+    <!-- Icons from public/ (`pnpm icons`); the web app manifest link is added by the build. -->
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+    <meta name="apple-mobile-web-app-title" content="Timer" />
     <title>Timer App</title>
   </head>
   <body>

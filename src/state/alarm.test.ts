@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { cards, timer, type EpochMs, type TimerState } from '../core'
+import { setAppLocale } from '../i18n'
 import type {
   AlarmPlayer,
   NotificationRequest,
@@ -10,10 +11,12 @@ import type {
   WakeScheduler,
 } from '../platform'
 import {
-  NOTIFICATION_BODY,
+  DEFAULT_ALARM_SETTINGS,
+  autoStopAt,
   createAlarmCore,
   timerStarted,
   type AlarmPlatform,
+  type AlarmSettings,
 } from './alarm.svelte'
 
 function fakePlatform(permission: ReturnType<Notifier['permission']> = 'granted') {
@@ -158,7 +161,8 @@ describe('createAlarmCore', () => {
 
   it('uses the configured sound and volume', () => {
     const p = fakePlatform()
-    const core = createAlarmCore(fakeStore().store, p.platform, { sound: 'bell', volume: 0.3 })
+    const settings = { ...DEFAULT_ALARM_SETTINGS, sound: 'bell', volume: 0.3 } as const
+    const core = createAlarmCore(fakeStore().store, p.platform, { settings: () => settings })
     core.sync(cards.settleAll(run(base, 'a', 0), 60_000))
     expect(p.played).toEqual([{ sound: 'bell', options: { loop: true, volume: 0.3 } }])
   })
@@ -172,11 +176,23 @@ describe('createAlarmCore', () => {
     expect(p.shown).toHaveLength(1)
     expect(p.shown[0]).toMatchObject({
       title: 'Tea',
-      body: NOTIFICATION_BODY,
+      body: "Time's up",
       tag: 'a',
       requireInteraction: true,
       closed: false,
     })
+  })
+
+  it('writes the notification body in the active locale', () => {
+    const p = fakePlatform()
+    const core = createAlarmCore(fakeStore().store, p.platform)
+    setAppLocale('ja')
+    try {
+      core.sync(cards.settleAll(run(base, 'a', 0), 60_000))
+    } finally {
+      setAppLocale('en')
+    }
+    expect(p.shown[0]).toMatchObject({ title: 'Tea', body: '時間です' })
   })
 
   it('closes the notification when the card stops ringing and notifies again next time', () => {
@@ -282,6 +298,203 @@ describe('createAlarmCore', () => {
     expect(p.played).toHaveLength(1)
     expect(p.unlocks).toBe(0)
     expect(p.stops).toBe(1)
+  })
+})
+
+/** An alarm core whose settings and clock the test changes. */
+function withSettings(initial: Partial<AlarmSettings> = {}, permission?: 'granted' | 'default') {
+  const p = fakePlatform(permission)
+  const s = fakeStore()
+  let settings: AlarmSettings = { ...DEFAULT_ALARM_SETTINGS, ...initial }
+  let now: EpochMs = 0
+  const core = createAlarmCore(s.store, p.platform, {
+    settings: () => settings,
+    clock: () => now,
+    bump: () => now,
+  })
+  return {
+    p,
+    s,
+    core,
+    set(partial: Partial<AlarmSettings>) {
+      settings = { ...settings, ...partial }
+    },
+    at(time: EpochMs) {
+      now = time
+    },
+  }
+}
+
+/** Timer 'a' (1:00) started at 0, so ringing from 60 000. */
+function ringingList(): cards.CardList {
+  return cards.settleAll(run(base, 'a', 0), 60_000)
+}
+
+describe('alarm settings', () => {
+  it('plays once per card that starts ringing when loop is off', () => {
+    const a = withSettings({ loop: false })
+    a.at(60_000)
+    // 'a' rings from 60 000; 'b' (2:00, started at 30 000) from 150 000.
+    const first = cards.settleAll(run(run(base, 'a', 0), 'b', 30_000), 60_000)
+    a.core.sync(first)
+    expect(a.p.played).toEqual([{ sound: 'chime', options: { loop: false, volume: 0.8 } }])
+    a.core.sync(cards.renameCard(first, 'a', 'Green tea'))
+    expect(a.p.played).toHaveLength(1)
+    a.at(150_000)
+    const second = cards.settleAll(first, 150_000)
+    a.core.sync(second)
+    expect(a.p.played).toHaveLength(2)
+    const oneLeft = cards.updateTimer(second, 'a', timer.dismiss)
+    a.core.sync(oneLeft)
+    expect(a.p.played).toHaveLength(2)
+    expect(a.p.stops).toBe(0)
+    a.core.sync(cards.updateTimer(oneLeft, 'b', timer.dismiss))
+    expect(a.p.stops).toBe(1)
+  })
+
+  it('plays once again for a card that rings again after a dismiss', () => {
+    const a = withSettings({ loop: false })
+    a.at(60_000)
+    const ringing = ringingList()
+    a.core.sync(ringing)
+    const dismissed = cards.updateTimer(ringing, 'a', timer.dismiss)
+    a.core.sync(dismissed)
+    a.at(200_000)
+    a.core.sync(cards.settleAll(run(dismissed, 'a', 100_000), 200_000))
+    expect(a.p.played).toHaveLength(2)
+  })
+
+  it('follows a new sound or volume while ringing, and ignores unrelated syncs', () => {
+    const a = withSettings()
+    a.at(60_000)
+    const ringing = ringingList()
+    a.core.sync(ringing)
+    a.core.sync(ringing)
+    expect(a.p.played).toHaveLength(1)
+    a.set({ volume: 0.4 })
+    a.core.sync(ringing)
+    a.set({ sound: 'beep' })
+    a.core.sync(ringing)
+    expect(a.p.played).toEqual([
+      { sound: 'chime', options: { loop: true, volume: 0.8 } },
+      { sound: 'chime', options: { loop: true, volume: 0.4 } },
+      { sound: 'beep', options: { loop: true, volume: 0.4 } },
+    ])
+  })
+
+  it('stops the loop when loop is turned off while ringing, and starts it when turned on', () => {
+    const a = withSettings()
+    a.at(60_000)
+    const ringing = ringingList()
+    a.core.sync(ringing)
+    a.set({ loop: false })
+    a.core.sync(ringing)
+    expect(a.p.stops).toBe(1)
+    expect(a.p.played).toHaveLength(1)
+    a.set({ loop: true })
+    a.core.sync(ringing)
+    expect(a.p.played.at(-1)).toEqual({ sound: 'chime', options: { loop: true, volume: 0.8 } })
+  })
+
+  it('goes quiet autoStopMinutes after a card started ringing, leaving the card ringing', () => {
+    const a = withSettings({ autoStopMinutes: 2 })
+    a.at(90_000)
+    const ringing = ringingList()
+    a.core.sync(ringing)
+    expect(a.p.played).toHaveLength(1)
+    expect(a.p.shown).toHaveLength(1)
+    // The wake-up comes at the auto-stop: ringing since 60 000, plus two minutes.
+    expect(a.p.scheduled.at(-1)).toBe(180_000)
+    a.at(180_000)
+    a.p.fire()
+    expect(a.s.settled).toEqual([180_000])
+    expect(a.p.stops).toBe(1)
+    expect(a.p.shown[0]?.closed).toBe(true)
+    expect(a.p.scheduled.at(-1)).toBeNull()
+    // Still ringing: no new sound or notification on later syncs.
+    a.core.sync(cards.renameCard(ringing, 'a', 'Green tea'))
+    a.at(500_000)
+    a.core.sync(ringing)
+    expect(a.p.played).toHaveLength(1)
+    expect(a.p.shown).toHaveLength(1)
+  })
+
+  it('keeps sounding while another card is before its auto-stop', () => {
+    const a = withSettings({ autoStopMinutes: 1 })
+    a.at(130_000)
+    // 'a' rings from 60 000 (quiet at 120 000), 'b' from 120 000 (quiet at 180 000).
+    a.core.sync(cards.settleAll(run(run(base, 'a', 0), 'b', 0), 130_000))
+    expect(a.p.played).toHaveLength(1)
+    expect(a.p.shown.map((n) => n.tag)).toEqual(['b'])
+    expect(a.p.scheduled.at(-1)).toBe(180_000)
+  })
+
+  it('stays silent for a timer that ended longer ago than the auto-stop (closed app)', () => {
+    const a = withSettings({ autoStopMinutes: 5 })
+    a.at(60_000 + 6 * 60_000)
+    a.core.sync(ringingList())
+    expect(a.p.played).toEqual([])
+    expect(a.p.shown).toEqual([])
+    expect(a.p.scheduled.at(-1)).toBeNull()
+  })
+
+  it('sounds again when auto-stop is turned off for a quiet ringing card', () => {
+    const a = withSettings({ autoStopMinutes: 1 })
+    a.at(200_000)
+    const ringing = ringingList()
+    a.core.sync(ringing)
+    expect(a.p.played).toEqual([])
+    a.set({ autoStopMinutes: 0 })
+    a.core.sync(ringing)
+    expect(a.p.played).toHaveLength(1)
+  })
+
+  it('shows no notifications while they are off, and closes those on screen', () => {
+    const a = withSettings({ notifications: false })
+    a.at(60_000)
+    const ringing = ringingList()
+    a.core.sync(ringing)
+    expect(a.p.shown).toEqual([])
+    expect(a.p.played).toHaveLength(1)
+    a.set({ notifications: true })
+    a.core.sync(ringing)
+    expect(a.p.shown).toHaveLength(1)
+    a.set({ notifications: false })
+    a.core.sync(ringing)
+    expect(a.p.shown[0]?.closed).toBe(true)
+    a.core.sync(ringing)
+    expect(a.p.shown).toHaveLength(1)
+  })
+
+  it('does not ask for notification permission while notifications are off', () => {
+    const a = withSettings({ notifications: false }, 'default')
+    a.core.prime()
+    a.core.sync(base)
+    a.core.sync(run(base, 'a', 0))
+    expect(a.p.requests).toBe(0)
+    a.set({ notifications: true })
+    a.core.prime()
+    expect(a.p.requests).toBe(1)
+  })
+
+  it('wakes at the earlier of the next running deadline and the next auto-stop', () => {
+    const a = withSettings({ autoStopMinutes: 3 })
+    a.at(60_000)
+    // 'a' rings from 60 000 (quiet at 240 000); 'b' (2:00) started at 30 000 ends at 150 000.
+    const both = run(ringingList(), 'b', 30_000)
+    a.core.sync(both)
+    expect(a.p.scheduled.at(-1)).toBe(150_000)
+    a.core.sync(cards.updateTimer(both, 'b', timer.reset))
+    expect(a.p.scheduled.at(-1)).toBe(240_000)
+  })
+})
+
+describe('autoStopAt', () => {
+  it('is autoStopMinutes after the end, or never for 0 and bad values', () => {
+    expect(autoStopAt(1_000, 2)).toBe(121_000)
+    expect(autoStopAt(1_000, 0)).toBe(Number.POSITIVE_INFINITY)
+    expect(autoStopAt(1_000, -1)).toBe(Number.POSITIVE_INFINITY)
+    expect(autoStopAt(1_000, Number.NaN)).toBe(Number.POSITIVE_INFINITY)
   })
 })
 

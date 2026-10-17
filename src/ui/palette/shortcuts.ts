@@ -2,12 +2,16 @@
  * Shortcut text for display: the labels the command palette shows next to each command and the
  * grouped rows of the keyboard cheat sheet (spec.md › Shortcuts). Pure; labels come from
  * `keymap.formatCombo`, so they follow the platform (`Ctrl+K` or `⌘K`) and the user's bindings.
+ * Section titles and row labels are messages, read when `helpSections` runs, so they follow the
+ * active locale; key labels are not translated.
  */
 import { keymap } from '../../core'
+import { m } from '../../i18n'
 
 /** A cheat-sheet row: a description and the actions (or fixed keys) that do it. */
 export interface HelpRowSpec {
-  readonly label: string
+  /** The description, as a message read when the sheet is built. */
+  readonly label: () => string
   /** Rebindable actions; the row shows the first combo of each when there are several. */
   readonly actions?: readonly keymap.ActionId[]
   /** Keys that are not rebindable (digit entry), shown as written. */
@@ -15,7 +19,8 @@ export interface HelpRowSpec {
 }
 
 export interface HelpSectionSpec {
-  readonly title: string
+  /** The section title, as a message read when the sheet is built. */
+  readonly title: () => string
   readonly rows: readonly HelpRowSpec[]
 }
 
@@ -42,54 +47,55 @@ export interface HelpSection {
  */
 export const HELP_SECTIONS: readonly HelpSectionSpec[] = [
   {
-    title: 'Timer',
+    title: m.help_section_timer,
     rows: [
-      { label: 'Type a duration', fixed: ['0–9'] },
-      { label: 'Delete the last digit', fixed: ['Backspace'] },
-      { label: 'Start or pause', actions: ['toggle'] },
-      { label: 'Start, or dismiss the alarm', actions: ['start'] },
-      { label: 'Dismiss the alarm', actions: ['dismiss'] },
-      { label: 'Reset', actions: ['reset'] },
+      { label: m.help_type_duration, fixed: ['0–9'] },
+      { label: m.help_delete_digit, fixed: ['Backspace'] },
+      { label: m.help_start_pause, actions: ['toggle'] },
+      { label: m.help_start_dismiss, actions: ['start'] },
+      { label: m.help_dismiss, actions: ['dismiss'] },
+      { label: m.help_reset, actions: ['reset'] },
     ],
   },
   {
-    title: 'Stopwatch',
+    title: m.help_section_stopwatch,
     rows: [
-      { label: 'Start or pause', actions: ['toggle'] },
-      { label: 'Lap', actions: ['lap'] },
-      { label: 'Reset', actions: ['reset'] },
+      { label: m.help_start_pause, actions: ['toggle'] },
+      { label: m.help_lap, actions: ['lap'] },
+      { label: m.help_reset, actions: ['reset'] },
     ],
   },
   {
-    title: 'Cards',
+    title: m.help_section_cards,
     rows: [
-      { label: 'New timer', actions: ['newTimer'] },
-      { label: 'New stopwatch', actions: ['newStopwatch'] },
-      { label: 'Timer presets', actions: ['presets'] },
-      { label: 'Rename', actions: ['rename'] },
-      { label: 'Mute or unmute', actions: ['mute'] },
-      { label: 'Fullscreen', actions: ['fullscreen'] },
-      { label: 'Delete', actions: ['deleteCard'] },
-      { label: 'Undo delete', actions: ['undo'] },
+      { label: m.help_new_timer, actions: ['newTimer'] },
+      { label: m.help_new_stopwatch, actions: ['newStopwatch'] },
+      { label: m.help_presets, actions: ['presets'] },
+      { label: m.help_rename, actions: ['rename'] },
+      { label: m.help_mute, actions: ['mute'] },
+      { label: m.help_fullscreen, actions: ['fullscreen'] },
+      { label: m.help_delete, actions: ['deleteCard'] },
+      { label: m.help_undo, actions: ['undo'] },
     ],
   },
   {
-    title: 'Navigation',
+    title: m.help_section_navigation,
     rows: [
       {
-        label: 'Select a card',
+        label: m.help_select,
         actions: ['selectLeft', 'selectRight', 'selectUp', 'selectDown'],
       },
-      { label: 'Move the card', actions: ['moveLeft', 'moveRight', 'moveUp', 'moveDown'] },
+      { label: m.help_move, actions: ['moveLeft', 'moveRight', 'moveUp', 'moveDown'] },
     ],
   },
   {
-    title: 'App',
+    title: m.help_section_app,
     rows: [
-      { label: 'Command palette', actions: ['palette'] },
-      { label: 'Keyboard shortcuts', actions: ['help'] },
-      { label: 'Edit mode', actions: ['editMode'] },
-      { label: 'Cancel typing, close, leave edit mode', actions: ['cancel'] },
+      { label: m.help_palette, actions: ['palette'] },
+      { label: m.help_shortcuts, actions: ['help'] },
+      { label: m.help_settings, actions: ['settings'] },
+      { label: m.help_edit_mode, actions: ['editMode'] },
+      { label: m.help_cancel, actions: ['cancel'] },
     ],
   },
 ]
@@ -100,14 +106,7 @@ function combosOf(
   action: keymap.ActionId,
   platform: keymap.Platform,
 ): keymap.KeyCombo[] {
-  const texts: unknown = bindings[action]
-  if (!Array.isArray(texts)) return []
-  const combos: keymap.KeyCombo[] = []
-  for (const text of texts as unknown[]) {
-    const combo = typeof text === 'string' ? keymap.parseCombo(text, platform) : null
-    if (combo !== null) combos.push(combo)
-  }
-  return combos
+  return keymap.parsedCombos(bindings, action, platform).map(({ combo }) => combo)
 }
 
 /**
@@ -184,22 +183,22 @@ export function helpSections(
       const [only] = actions
       if (actions.length === 1 && only !== undefined) {
         const keys = [...(row.fixed ?? []), ...comboLabels(bindings, only, platform)]
-        if (keys.length > 0) rows.push({ label: row.label, keys })
+        if (keys.length > 0) rows.push({ label: row.label(), keys })
         continue
       }
       const combos = actions.flatMap((action) => combosOf(bindings, action, platform).slice(0, 1))
       const shared = splitSharedModifier(combos, platform)
       if (shared !== null && row.fixed === undefined) {
-        rows.push({ label: row.label, ...shared })
+        rows.push({ label: row.label(), ...shared })
         continue
       }
       const keys = [
         ...(row.fixed ?? []),
         ...combos.map((combo) => keymap.formatCombo(combo, platform)),
       ]
-      if (keys.length > 0) rows.push({ label: row.label, keys })
+      if (keys.length > 0) rows.push({ label: row.label(), keys })
     }
-    if (rows.length > 0) out.push({ title: section.title, rows })
+    if (rows.length > 0) out.push({ title: section.title(), rows })
   }
   return out
 }

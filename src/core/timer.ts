@@ -14,9 +14,15 @@ import type { EpochMs, Ms, TimerState } from './types'
 
 /**
  * The longest span the engine stores or reads: 8.64e15 ms, the reach of a JavaScript Date
- * (100,000,000 days). Adding it to any finite timestamp still gives a finite timestamp.
+ * (100,000,000 days). Adding it to any finite timestamp still gives a finite timestamp. Stored
+ * data and import files are checked against it ({@link isSpan}).
  */
-const MAX_MS: Ms = 8.64e15
+export const MAX_MS: Ms = 8.64e15
+
+/** Whether `value` is a span as the engine stores it: a finite number from 0 to {@link MAX_MS}. */
+export function isSpan(value: unknown): value is Ms {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= MAX_MS
+}
 
 /**
  * A caller's duration made usable: NaN, ±Infinity and ≤ 0 give 0, and finite values saturate at

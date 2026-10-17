@@ -1,10 +1,12 @@
 /**
  * The command palette's commands (spec.md › Command palette): new cards and presets, actions on
- * the selected card, edit mode and help, each with the keyboard shortcut that does the same.
- * Typing 1–6 digits adds "New timer HH:MM:SS" at the top, which creates and starts that timer.
+ * the selected card, edit mode, help and settings, each with the keyboard shortcut that does the
+ * same. Typing 1–6 digits adds "New timer HH:MM:SS" at the top, which creates and starts that
+ * timer. Durations in hints follow the time style setting.
  *
  * Commands are rebuilt from the current state whenever the palette shows them, so titles follow
- * the selected card ("Pause" while it runs). `run` acts on the store's state at that moment.
+ * the selected card ("Pause" while it runs) and the active locale. `run` acts on the store's
+ * state at that moment.
  */
 import {
   cards,
@@ -16,7 +18,9 @@ import {
   type keymap,
   type StopwatchPhase,
   type TimerPhase,
+  type TimeStyle,
 } from '../../core'
+import { m } from '../../i18n'
 import type { CardStore } from '../../state/cards.svelte'
 import type { AppActions } from '../../state/keyboard.svelte'
 import { runTimer, toggleTimer } from '../../state/timer-actions'
@@ -32,6 +36,8 @@ export interface CommandContext {
   readonly presets?: readonly Preset[] | undefined
   /** Whether edit mode is on, for the edit-mode command's title. */
   readonly editing?: boolean | undefined
+  /** The time style setting, for durations in hints. Compact by default. */
+  readonly timeStyle?: TimeStyle | undefined
   /** Called after a command starts, resumes or restarts timer `id` (see `KeyboardDeps.onStart`). */
   readonly onStart?: ((id: cards.CardId) => void) | undefined
   /**
@@ -55,17 +61,23 @@ export interface Command {
   readonly run: () => void
 }
 
-const TIMER_TOGGLE: Readonly<Record<TimerPhase, { title: string; icon: IconName }>> = {
-  idle: { title: 'Start', icon: 'play_arrow' },
-  running: { title: 'Pause', icon: 'pause' },
-  paused: { title: 'Resume', icon: 'play_arrow' },
-  ringing: { title: 'Dismiss', icon: 'done' },
+/** A toggle command's look per phase; the title is a message, read when the list is built. */
+interface Toggle {
+  readonly title: () => string
+  readonly icon: IconName
 }
 
-const STOPWATCH_TOGGLE: Readonly<Record<StopwatchPhase, { title: string; icon: IconName }>> = {
-  idle: { title: 'Start', icon: 'play_arrow' },
-  running: { title: 'Pause', icon: 'pause' },
-  paused: { title: 'Resume', icon: 'play_arrow' },
+const TIMER_TOGGLE: Readonly<Record<TimerPhase, Toggle>> = {
+  idle: { title: m.command_start, icon: 'play_arrow' },
+  running: { title: m.command_pause, icon: 'pause' },
+  paused: { title: m.command_resume, icon: 'play_arrow' },
+  ringing: { title: m.command_dismiss, icon: 'done' },
+}
+
+const STOPWATCH_TOGGLE: Readonly<Record<StopwatchPhase, Toggle>> = {
+  idle: { title: m.command_start, icon: 'play_arrow' },
+  running: { title: m.command_pause, icon: 'pause' },
+  paused: { title: m.command_resume, icon: 'play_arrow' },
 }
 
 /** The query that offers a new timer: one to six ASCII digits. */
@@ -78,10 +90,12 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
   const out: Command[] = []
   if (card.kind === 'timer') {
     const t = card.timer
+    const toggle = TIMER_TOGGLE[t.phase]
     out.push(
       {
         id: 'toggle',
-        ...TIMER_TOGGLE[t.phase],
+        title: toggle.title(),
+        icon: toggle.icon,
         hint,
         shortcut: 'toggle',
         when: t.phase !== 'idle' || t.duration > 0,
@@ -91,7 +105,7 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
       },
       {
         id: 'restart',
-        title: 'Restart',
+        title: m.command_restart(),
         hint,
         icon: 'restart_alt',
         when: t.phase === 'ringing',
@@ -101,7 +115,7 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
       },
       {
         id: 'reset',
-        title: 'Reset',
+        title: m.command_reset(),
         hint,
         shortcut: 'reset',
         icon: 'restart_alt',
@@ -113,10 +127,12 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
     )
   } else {
     const s = card.stopwatch
+    const toggle = STOPWATCH_TOGGLE[s.phase]
     out.push(
       {
         id: 'toggle',
-        ...STOPWATCH_TOGGLE[s.phase],
+        title: toggle.title(),
+        icon: toggle.icon,
         hint,
         shortcut: 'toggle',
         run: () => {
@@ -125,7 +141,7 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
       },
       {
         id: 'lap',
-        title: 'Lap',
+        title: m.command_lap(),
         hint,
         shortcut: 'lap',
         icon: 'flag',
@@ -136,7 +152,7 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
       },
       {
         id: 'reset',
-        title: 'Reset',
+        title: m.command_reset(),
         hint,
         shortcut: 'reset',
         icon: 'restart_alt',
@@ -150,7 +166,7 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
   out.push(
     {
       id: 'mute',
-      title: card.muted ? 'Unmute' : 'Mute',
+      title: card.muted ? m.command_unmute() : m.command_mute(),
       hint,
       shortcut: 'mute',
       icon: card.muted ? 'volume_up' : 'volume_off',
@@ -160,7 +176,7 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
     },
     {
       id: 'rename',
-      title: 'Rename',
+      title: m.command_rename(),
       hint,
       shortcut: 'rename',
       icon: 'edit',
@@ -170,7 +186,7 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
     },
     {
       id: 'fullscreen',
-      title: 'Fullscreen',
+      title: m.command_fullscreen(),
       hint,
       shortcut: 'fullscreen',
       icon: 'fullscreen',
@@ -180,12 +196,13 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
     },
     {
       id: 'delete',
-      title: 'Delete',
+      title: m.command_delete(),
       hint,
       shortcut: 'deleteCard',
       icon: 'delete',
       run: () => {
-        store.remove(id)
+        // The app deletes, or asks first when the confirm-delete setting is on.
+        actions.deleteCard(id)
       },
     },
   )
@@ -194,17 +211,18 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
 
 /**
  * Every command, in palette order: actions on the selected card, undo, new cards, presets, edit
- * mode and help. Commands that do not apply now have `when: false`.
+ * mode, help and settings. Commands that do not apply now have `when: false`.
  */
 export function buildCommands(ctx: CommandContext): readonly Command[] {
   const { cardStore: store, actions } = ctx
+  const style = ctx.timeStyle ?? 'compact'
   const card = store.selected
   const removed = store.lastRemoved
   const commands: Command[] = card === undefined ? [] : cardCommands(ctx, card)
   commands.push(
     {
       id: 'undo',
-      title: 'Undo delete',
+      title: m.command_undo_delete(),
       ...(removed === null ? {} : { hint: removed.card.name }),
       shortcut: 'undo',
       icon: 'undo',
@@ -215,8 +233,8 @@ export function buildCommands(ctx: CommandContext): readonly Command[] {
     },
     {
       id: 'new-timer',
-      title: 'New timer',
-      hint: formatCountdown(cards.DEFAULT_TIMER_DURATION),
+      title: m.command_new_timer(),
+      hint: formatCountdown(cards.DEFAULT_TIMER_DURATION, style),
       shortcut: 'newTimer',
       icon: 'add',
       run: () => {
@@ -225,7 +243,7 @@ export function buildCommands(ctx: CommandContext): readonly Command[] {
     },
     {
       id: 'new-stopwatch',
-      title: 'New stopwatch',
+      title: m.command_new_stopwatch(),
       shortcut: 'newStopwatch',
       icon: 'add',
       run: () => {
@@ -236,8 +254,8 @@ export function buildCommands(ctx: CommandContext): readonly Command[] {
   ;(ctx.presets ?? []).forEach((preset, index) => {
     commands.push({
       id: `preset-${String(index)}`,
-      title: `New timer: ${preset.name}`,
-      hint: formatCountdown(preset.duration),
+      title: m.command_new_timer_preset({ name: preset.name }),
+      hint: formatCountdown(preset.duration, style),
       icon: 'hourglass_top',
       run: () => {
         store.addTimer(preset.duration, preset.name)
@@ -247,7 +265,7 @@ export function buildCommands(ctx: CommandContext): readonly Command[] {
   commands.push(
     {
       id: 'edit-mode',
-      title: ctx.editing === true ? 'Done editing' : 'Edit cards',
+      title: ctx.editing === true ? m.command_done_editing() : m.command_edit_cards(),
       shortcut: 'editMode',
       icon: ctx.editing === true ? 'done' : 'edit',
       run: () => {
@@ -256,11 +274,20 @@ export function buildCommands(ctx: CommandContext): readonly Command[] {
     },
     {
       id: 'help',
-      title: 'Keyboard shortcuts',
+      title: m.command_shortcuts(),
       shortcut: 'help',
       icon: 'keyboard',
       run: () => {
         actions.openHelp()
+      },
+    },
+    {
+      id: 'settings',
+      title: m.command_settings(),
+      shortcut: 'settings',
+      icon: 'settings',
+      run: () => {
+        actions.openSettings()
       },
     },
   )
@@ -284,8 +311,8 @@ export function digitCommand(ctx: CommandContext, query: string): Command | null
   const overflow = minutes >= 60 || seconds >= 60
   return {
     id: 'new-typed-timer',
-    title: `New timer ${digits.formatTyped(buffer)}`,
-    ...(overflow ? { hint: formatCountdown(duration) } : {}),
+    title: m.command_new_timer_typed({ time: digits.formatTyped(buffer) }),
+    ...(overflow ? { hint: formatCountdown(duration, ctx.timeStyle ?? 'compact') } : {}),
     icon: 'hourglass_top',
     run: () => {
       const id = ctx.cardStore.addTimer(duration)

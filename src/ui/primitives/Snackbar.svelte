@@ -1,8 +1,9 @@
 <!--
   @component
   A Material 3 snackbar: a short message with an optional action ("Deleted Timer · Undo"), at the
-  bottom of the screen. It hides itself after `timeout` ms; hovering or focusing it pauses the
-  countdown (WCAG 2.2.1), which restarts in full afterwards. Change `key` to restart the countdown
+  bottom of the screen. It hides itself after `timeout` ms (or stays, with `timeout={0}`); hovering
+  or focusing it pauses the countdown (WCAG 2.2.1), which restarts in full afterwards. A
+  `dismissLabel` adds a second button that only closes it. Change `key` to restart the countdown
   for a new message while it is already showing.
 
   The message sits in a `role="status"` region that stays in the page, so screen readers announce
@@ -25,12 +26,14 @@
     /** Text of the action button; no button without it. */
     actionLabel?: string
     onaction?: () => void
+    /** Text of a second button that just closes the snackbar ("Later"); none without it. */
+    dismissLabel?: string
     /** Milliseconds until it hides itself. 0 keeps it until `open` is set to false. */
     timeout?: number
     /** Any value; changing it restarts the countdown (a second delete while one is showing). */
     key?: unknown
-    /** Runs when the snackbar hides itself: after the timeout or after its action. */
-    onclose?: (reason: 'timeout' | 'action') => void
+    /** Runs when the snackbar hides itself: after the timeout, its action or its dismiss button. */
+    onclose?: (reason: 'timeout' | 'action' | 'dismiss') => void
     /** Whether the message is a live region that screen readers announce. */
     live?: boolean
     /** Extra text for screen readers, after the message ("Press Ctrl+Z to undo."). */
@@ -42,6 +45,7 @@
     message,
     actionLabel,
     onaction,
+    dismissLabel,
     timeout = 6000,
     key,
     onclose,
@@ -78,6 +82,11 @@
     open = false
     onclose?.('action')
   }
+
+  function dismiss() {
+    open = false
+    onclose?.('dismiss')
+  }
 </script>
 
 <div class="region" role={live ? 'status' : undefined}>
@@ -103,6 +112,9 @@
       <span class="message"
         >{message}{#if hint}<span class="visually-hidden">&nbsp;{hint}</span>{/if}</span
       >
+      {#if dismissLabel}
+        <button type="button" class="action" onclick={dismiss}>{dismissLabel}</button>
+      {/if}
       {#if actionLabel}
         <button type="button" class="action" onclick={act}>{actionLabel}</button>
       {/if}

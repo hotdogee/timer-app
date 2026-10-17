@@ -1,6 +1,7 @@
-import { describe, expect, it, vi, type Mock } from 'vitest'
+import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { cards, digits, stopwatch, timer, type DigitBuffer, type EpochMs } from '../../core'
+import { setAppLocale } from '../../i18n'
 import { createCardStore, type CardStore } from '../../state/cards.svelte'
 import {
   buildCommands,
@@ -28,11 +29,13 @@ type CardAction = (id: string) => void
 interface ActionMocks {
   openPalette: Mock<Action>
   openHelp: Mock<Action>
+  openSettings: Mock<Action>
   toggleEditMode: Mock<Action>
   startRename: Mock<CardAction>
   toggleFullscreen: Mock<CardAction>
   miniWindow: Mock<CardAction>
   openPresets: Mock<Action>
+  deleteCard: Mock<CardAction>
   undoRemove: Mock<Action>
   cancel: Mock<Action>
 }
@@ -50,11 +53,16 @@ function setup(extra: Partial<CommandContext> = {}): {
   const actions: ActionMocks = {
     openPalette: vi.fn<Action>(),
     openHelp: vi.fn<Action>(),
+    openSettings: vi.fn<Action>(),
     toggleEditMode: vi.fn<Action>(),
     startRename: vi.fn<CardAction>(),
     toggleFullscreen: vi.fn<CardAction>(),
     miniWindow: vi.fn<CardAction>(),
     openPresets: vi.fn<Action>(),
+    // The app's delete without the confirm-delete setting: at once, through the store.
+    deleteCard: vi.fn<CardAction>((id) => {
+      store.remove(id)
+    }),
     undoRemove: vi.fn<Action>(),
     cancel: vi.fn<Action>(),
   }
@@ -95,6 +103,7 @@ describe('buildCommands', () => {
       'preset-1',
       'edit-mode',
       'help',
+      'settings',
     ])
   })
 
@@ -234,7 +243,7 @@ describe('buildCommands', () => {
     expect(store.selected?.muted).toBe(false)
   })
 
-  it('hands rename, fullscreen, undo, edit mode and help to the app', () => {
+  it('hands rename, fullscreen, undo, edit mode, help and settings to the app', () => {
     const { ctx, store, actions } = setup()
     store.addTimer()
     get(ctx, 'rename').run()
@@ -245,15 +254,19 @@ describe('buildCommands', () => {
     expect(actions.toggleEditMode).toHaveBeenCalledTimes(1)
     get(ctx, 'help').run()
     expect(actions.openHelp).toHaveBeenCalledTimes(1)
+    expect(get(ctx, 'settings')).toMatchObject({ title: 'Settings…', shortcut: 'settings' })
+    get(ctx, 'settings').run()
+    expect(actions.openSettings).toHaveBeenCalledTimes(1)
     store.remove('id1')
     get(ctx, 'undo').run()
     expect(actions.undoRemove).toHaveBeenCalledTimes(1)
   })
 
-  it('deletes through the store, which remembers the card for undo', () => {
-    const { ctx, store } = setup()
+  it('deletes through the app, which may ask first, and the store keeps the card for undo', () => {
+    const { ctx, store, actions } = setup()
     store.addTimer()
     get(ctx, 'delete').run()
+    expect(actions.deleteCard).toHaveBeenCalledWith('id1')
     expect(store.cards).toEqual([])
     expect(store.lastRemoved?.card.id).toBe('id1')
   })
@@ -293,6 +306,13 @@ describe('buildCommands', () => {
       cards.createStopwatchCard('id2', 'Stopwatch', NOW),
     ])
     expect(get(ctx, 'new-timer').hint).toBe('5:00')
+  })
+
+  it('writes durations in the fixed time style when it is set', () => {
+    const { ctx } = setup({ timeStyle: 'fixed' })
+    expect(get(ctx, 'new-timer').hint).toBe('00:05:00')
+    expect(get(ctx, 'preset-0').hint).toBe('00:03:00')
+    expect(digitCommand(ctx, '90')?.hint).toBe('00:01:30')
   })
 
   it('works without presets', () => {
@@ -384,5 +404,32 @@ describe('paletteResults', () => {
     store.addTimer()
     expect(paletteResults(ctx, 'reset')).toEqual([])
     expect(paletteResults(ctx, 'undo')).toEqual([])
+  })
+})
+
+describe('commands in other locales', () => {
+  afterEach(() => {
+    setAppLocale('en')
+  })
+
+  it('are titled in the active locale when the list is built', () => {
+    const { ctx, store } = setup()
+    store.addTimer()
+    setAppLocale('ja')
+    expect(get(ctx, 'toggle').title).toBe('開始')
+    expect(get(ctx, 'preset-0').title).toBe('新しいタイマー：Tea')
+    expect(get(ctx, 'edit-mode').title).toBe('カードを編集')
+    expect(digitCommand(ctx, '90')?.title).toBe('新しいタイマー 00:00:90')
+    setAppLocale('zh-TW')
+    expect(get(ctx, 'mute').title).toBe('靜音')
+    expect(get(ctx, 'help').title).toBe('鍵盤快速鍵')
+  })
+
+  it('are found by their localized titles', () => {
+    const { ctx } = setup()
+    setAppLocale('zh-TW')
+    expect(paletteResults(ctx, '碼錶')[0]?.id).toBe('new-stopwatch')
+    setAppLocale('ja')
+    expect(paletteResults(ctx, 'ショートカット')[0]?.id).toBe('help')
   })
 })

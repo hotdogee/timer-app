@@ -58,9 +58,20 @@ function keyEvent(key: string, mods: Mods = {}): KeyboardEventLike & { prevented
 /** A minimal element for target checks: tag, type, role, editability and a parent. */
 function el(
   tagName: string,
-  init: { type?: string; role?: string; href?: string; editable?: boolean; parent?: object } = {},
+  init: {
+    type?: string
+    role?: string
+    href?: string
+    editable?: boolean
+    parent?: object
+    open?: boolean
+  } = {},
 ): object {
-  const attributes: Record<string, string | undefined> = { role: init.role, href: init.href }
+  const attributes: Record<string, string | undefined> = {
+    role: init.role,
+    href: init.href,
+    open: init.open === true ? '' : undefined,
+  }
   return {
     tagName,
     type: init.type ?? (tagName === 'INPUT' ? 'text' : ''),
@@ -77,11 +88,13 @@ type CardAction = (id: string) => void
 interface ActionMocks {
   openPalette: Mock<Action>
   openHelp: Mock<Action>
+  openSettings: Mock<Action>
   toggleEditMode: Mock<Action>
   startRename: Mock<CardAction>
   toggleFullscreen: Mock<CardAction>
   miniWindow: Mock<CardAction>
   openPresets: Mock<Action>
+  deleteCard: Mock<CardAction>
   undoRemove: Mock<Action>
   cancel: Mock<Action>
 }
@@ -90,11 +103,13 @@ function actionsMock(): ActionMocks {
   return {
     openPalette: vi.fn<Action>(),
     openHelp: vi.fn<Action>(),
+    openSettings: vi.fn<Action>(),
     toggleEditMode: vi.fn<Action>(),
     startRename: vi.fn<CardAction>(),
     toggleFullscreen: vi.fn<CardAction>(),
     miniWindow: vi.fn<CardAction>(),
     openPresets: vi.fn<Action>(),
+    deleteCard: vi.fn<CardAction>(),
     undoRemove: vi.fn<Action>(),
     cancel: vi.fn<Action>(),
   }
@@ -129,6 +144,10 @@ function setup(options: { platform?: keymap.Platform; deps?: Partial<KeyboardDep
     bump: () => now,
   })
   const actions = actionsMock()
+  // The app's delete, without the confirm-delete setting: at once, through the store.
+  actions.deleteCard.mockImplementation((id) => {
+    store.remove(id)
+  })
   const onStart = vi.fn<CardAction>()
   const controller = createKeyboardController({
     cardStore: store,
@@ -562,9 +581,18 @@ describe('adding and deleting cards', () => {
   it('deletes the selected card with Delete, remembering it for undo', () => {
     const s = withTimer()
     s.press('n')
-    s.press('Delete')
+    expect(s.press('Delete')).toBe(true)
+    expect(s.actions.deleteCard).toHaveBeenCalledWith('id2')
     expect(s.store.cards.map((c) => c.id)).toEqual(['id1'])
     expect(s.store.lastRemoved).toMatchObject({ card: { id: 'id2' }, index: 1 })
+  })
+
+  it('leaves the delete to the app, which may ask first (confirm before delete)', () => {
+    const s = withTimer()
+    s.actions.deleteCard.mockReset()
+    s.press('Delete')
+    expect(s.actions.deleteCard).toHaveBeenCalledWith('id1')
+    expect(s.store.cards).toHaveLength(1)
   })
 
   it('does not delete with Backspace, which only edits digits', () => {
@@ -577,6 +605,7 @@ describe('adding and deleting cards', () => {
   it('does nothing on Delete with no cards', () => {
     const s = setup()
     s.press('Delete')
+    expect(s.actions.deleteCard).not.toHaveBeenCalled()
     expect(s.store.lastRemoved).toBeNull()
   })
 
@@ -632,6 +661,28 @@ describe('card and app shortcuts', () => {
     expect(s.actions.openPresets).toHaveBeenCalledTimes(1)
     s.press('e')
     expect(s.actions.toggleEditMode).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens the settings with Mod+, (Ctrl elsewhere, Cmd on macOS)', () => {
+    const other = withTimer()
+    expect(other.press(',', { ctrl: true })).toBe(true)
+    expect(other.actions.openSettings).toHaveBeenCalledTimes(1)
+    other.press(',')
+    other.press(',', { meta: true })
+    expect(other.actions.openSettings).toHaveBeenCalledTimes(1)
+    const mac = withTimer({ platform: 'mac' })
+    mac.press(',', { meta: true })
+    mac.press(',', { ctrl: true })
+    expect(mac.actions.openSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not open the settings while a dialog is open or a field has focus', () => {
+    const s = withTimer()
+    s.setDialogOpen(true)
+    s.press(',', { ctrl: true })
+    s.setDialogOpen(false)
+    s.press(',', { ctrl: true, target: el('INPUT') })
+    expect(s.actions.openSettings).not.toHaveBeenCalled()
   })
 
   it('opens the palette with Cmd+K on macOS', () => {
@@ -801,13 +852,20 @@ describe('when shortcuts are ignored', () => {
     expect(s.store.cards).toHaveLength(2)
   })
 
-  it('ignores keys from inside a dialog element even after it closed', () => {
+  it('ignores keys from inside an open dialog element', () => {
     const s = withTimer()
-    const dialog = el('DIALOG')
+    const dialog = el('DIALOG', { open: true })
     const option = el('LI', { role: 'option', parent: el('UL', { parent: dialog }) })
     expect(s.press('Enter', { target: option })).toBe(false)
     expect(s.press('n', { target: dialog })).toBe(false)
     expect(s.timerState()?.phase).toBe('idle')
+  })
+
+  it('takes a key pressed right after a dialog closed, while focus is still inside it', () => {
+    const s = withTimer()
+    const button = el('BUTTON', { parent: el('DIALOG') })
+    expect(s.press('n', { target: button })).toBe(true)
+    expect(s.store.cards).toHaveLength(2)
   })
 
   it('ignores events another handler prevented, and IME composition', () => {
@@ -970,12 +1028,18 @@ describe('target checks', () => {
     expect(ownsArrows(null)).toBe(false)
   })
 
-  it('finds a dialog among the ancestors', () => {
-    const dialog = el('DIALOG')
+  it('finds an open dialog among the ancestors', () => {
+    const dialog = el('DIALOG', { open: true })
     expect(insideDialog(dialog)).toBe(true)
     expect(insideDialog(el('SPAN', { parent: el('DIV', { parent: dialog }) }))).toBe(true)
     expect(insideDialog(el('SPAN', { parent: el('MAIN') }))).toBe(false)
     expect(insideDialog(null)).toBe(false)
+  })
+
+  it('does not count a closed dialog, where focus can linger for a frame', () => {
+    const closed = el('DIALOG')
+    expect(insideDialog(closed)).toBe(false)
+    expect(insideDialog(el('BUTTON', { parent: closed }))).toBe(false)
   })
 
   it('stops walking a cyclic parent chain', () => {

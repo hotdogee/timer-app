@@ -2,11 +2,16 @@
  * The app's icon set: Material Symbols (outlined, weight 400), imported as raw SVG so only these
  * icons ship. Every symbol is one `<path>` on a `0 -960 960 960` view box; we keep the path data.
  *
- * Play, pause and the volume icons use the filled variant, as the reference card does
+ * The four arrows draw the arrow keys on key caps (`KeyLabel.svelte`) and the presets' reorder
+ * buttons. Play, pause and the volume icons use the filled variant, as the reference card does
  * (docs/design/card-*.png). `done` is the same glyph as `check` (Material Symbols 0.48 dropped the
  * separate file).
  */
 import add from '@material-symbols/svg-400/outlined/add.svg?raw'
+import arrowBack from '@material-symbols/svg-400/outlined/arrow_back.svg?raw'
+import arrowDownward from '@material-symbols/svg-400/outlined/arrow_downward.svg?raw'
+import arrowForward from '@material-symbols/svg-400/outlined/arrow_forward.svg?raw'
+import arrowUpward from '@material-symbols/svg-400/outlined/arrow_upward.svg?raw'
 import check from '@material-symbols/svg-400/outlined/check.svg?raw'
 import close from '@material-symbols/svg-400/outlined/close.svg?raw'
 import deleteIcon from '@material-symbols/svg-400/outlined/delete.svg?raw'
@@ -24,6 +29,7 @@ import pictureInPictureAlt from '@material-symbols/svg-400/outlined/picture_in_p
 import playArrow from '@material-symbols/svg-400/outlined/play_arrow-fill.svg?raw'
 import restartAlt from '@material-symbols/svg-400/outlined/restart_alt.svg?raw'
 import search from '@material-symbols/svg-400/outlined/search.svg?raw'
+import settings from '@material-symbols/svg-400/outlined/settings.svg?raw'
 import timer from '@material-symbols/svg-400/outlined/timer.svg?raw'
 import undo from '@material-symbols/svg-400/outlined/undo.svg?raw'
 import volumeOff from '@material-symbols/svg-400/outlined/volume_off-fill.svg?raw'
@@ -31,6 +37,10 @@ import volumeUp from '@material-symbols/svg-400/outlined/volume_up-fill.svg?raw'
 
 const SOURCES = {
   add,
+  arrow_back: arrowBack,
+  arrow_downward: arrowDownward,
+  arrow_forward: arrowForward,
+  arrow_upward: arrowUpward,
   check,
   close,
   delete: deleteIcon,
@@ -49,6 +59,7 @@ const SOURCES = {
   play_arrow: playArrow,
   restart_alt: restartAlt,
   search,
+  settings,
   timer,
   undo,
   volume_off: volumeOff,

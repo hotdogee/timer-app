@@ -15,9 +15,23 @@
 html {
   /* Until the theme is injected, and wherever it is not: follow the OS. */
   color-scheme: light dark;
+  /*
+   * scrollIntoView (a new or selected card) keeps the card clear of the floating action bar,
+   * whose band App.svelte's padding reserves at the end of the page.
+   */
+  scroll-padding-block-end: calc(var(--space-4) * 2 + 3.5rem);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* A theme mode forced in Settings, before the theme is injected (index.html sets it early). */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 body {
@@ -39,6 +53,16 @@ textarea {
   font: inherit;
   letter-spacing: inherit;
   color: inherit;
+}
+
+/*
+ * Japanese may break between any two characters, but a break inside a word (削 / 除) reads as
+ * broken: headings and short texts break between phrases where the browser can tell them apart
+ * (Chromium; others ignore it), still wrapping anywhere when a phrase does not fit.
+ */
+:root:lang(ja) :is(h1, h2, h3, h4, p, dt, .description) {
+  word-break: auto-phrase;
+  overflow-wrap: break-word;
 }
 
 /* Components set display on their roots; the hidden attribute must still win. */

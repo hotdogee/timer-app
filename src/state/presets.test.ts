@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { formatCountdown } from '../core'
-import { BUILTIN_PRESETS, findPreset } from './presets'
+import {
+  BUILTIN_PRESETS,
+  MAX_PRESET_DURATION,
+  findPreset,
+  isPresetDuration,
+  presetName,
+} from './presets'
 
 describe('BUILTIN_PRESETS', () => {
   it('lists the spec presets in order: Tea 3:00, Pomodoro 25:00, Break 5:00, Eggs 7:00', () => {
@@ -45,5 +51,40 @@ describe('findPreset', () => {
     const custom = [{ id: 'coffee', name: 'Coffee', duration: 240_000 }]
     expect(findPreset('coffee', custom)?.duration).toBe(240_000)
     expect(findPreset('tea', custom)).toBeUndefined()
+  })
+})
+
+describe('presetName', () => {
+  it('trims a name and refuses a blank one', () => {
+    expect(presetName('  Green tea ')).toBe('Green tea')
+    expect(presetName('お茶')).toBe('お茶')
+    expect(presetName('')).toBeNull()
+    expect(presetName(' \t\n ')).toBeNull()
+  })
+})
+
+describe('isPresetDuration', () => {
+  it('accepts positive finite spans up to the engine limit', () => {
+    expect(isPresetDuration(1)).toBe(true)
+    expect(isPresetDuration(25 * 60_000)).toBe(true)
+    expect(isPresetDuration(MAX_PRESET_DURATION)).toBe(true)
+  })
+
+  it('refuses zero, negative, non-finite and oversized durations', () => {
+    for (const duration of [
+      0,
+      -0,
+      -1,
+      Number.NaN,
+      Infinity,
+      -Infinity,
+      MAX_PRESET_DURATION + 1e3,
+    ]) {
+      expect(isPresetDuration(duration)).toBe(false)
+    }
+  })
+
+  it('accepts every built-in preset', () => {
+    expect(BUILTIN_PRESETS.every((p) => isPresetDuration(p.duration))).toBe(true)
   })
 })

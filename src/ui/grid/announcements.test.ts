@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import { cards, stopwatch, timer } from '../../core'
-import { describeChanges } from './announcements'
+import { setAppLocale } from '../../i18n'
+import { describeChanges, joinAnnouncements } from './announcements'
 
 const tea = cards.createTimerCard('t', 'Tea', 0, 180_000)
 const lap = cards.createStopwatchCard('s', 'Run', 0)
@@ -105,5 +106,47 @@ describe('describeChanges', () => {
       (s) => stopwatch.start(s, 0),
     )
     expect(describeChanges(base, both)).toEqual(['Tea started, 3:00', 'Run started'])
+  })
+})
+
+describe('describeChanges in other locales', () => {
+  afterEach(() => {
+    setAppLocale('en')
+  })
+
+  it('speaks Japanese', () => {
+    setAppLocale('ja')
+    const running = withTimer(base, (t) => timer.start(t, 0))
+    expect(describeChanges(base, running)).toEqual(['「Tea」を開始しました（3:00）'])
+    const ringing = cards.settleAll(running, 1_000_000)
+    expect(describeChanges(running, ringing)).toEqual(['「Tea」の時間です'])
+    const three = cards.addCard(base, cards.createTimerCard('e', 'Eggs', 0))
+    expect(describeChanges(three, cards.moveCard(three, 'e', 0))).toEqual([
+      '「Eggs」を 3 件中 1 番目に移動しました',
+    ])
+  })
+
+  it('speaks Traditional Chinese', () => {
+    setAppLocale('zh-TW')
+    const paused = withStopwatch(
+      withStopwatch(base, (s) => stopwatch.start(s, 0)),
+      (s) => stopwatch.pause(s, 1_530),
+    )
+    expect(describeChanges(base, paused)).toEqual(['「Run」已暫停，1.53'])
+    expect(describeChanges(cards.removeCard(base, 't'), base, 't')).toEqual(['已還原「Tea」'])
+  })
+})
+
+describe('joinAnnouncements', () => {
+  afterEach(() => {
+    setAppLocale('en')
+  })
+
+  it('joins announcements into one utterance with the locale’s sentence break', () => {
+    expect(joinAnnouncements([])).toBe('')
+    expect(joinAnnouncements(['Tea started, 3:00'])).toBe('Tea started, 3:00')
+    expect(joinAnnouncements(['A', 'B', 'C'])).toBe('A. B. C')
+    setAppLocale('ja')
+    expect(joinAnnouncements(['A', 'B'])).toBe('A。B')
   })
 })

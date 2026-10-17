@@ -3,8 +3,9 @@
   A Material 3 pill button. `label` is always the accessible name; with `hideLabel` only the icon
   shows (the card's Start, Pause and Reset buttons) and the label becomes `aria-label` and a tooltip.
 
-  Variants: `filled` (primary), `tonal` (`--button-tonal-container`, by default
-  surface-container-highest, with on-surface content: the card's secondary buttons) and `text`. Size it from outside with `--button-height`,
+  Variants: `filled` (primary), `tonal` (`--button-tonal-container` and `--button-tonal-content`,
+  by default surface-container-highest with on-surface content: the card's secondary buttons) and
+  `text`. Size it from outside with `--button-height`,
   `--button-font-size`, `--button-icon-size` and `--button-padding`; it never gets shorter than
   `--touch-target`.
 
@@ -123,7 +124,7 @@
 
   .tonal {
     --_container: var(--button-tonal-container, var(--md-sys-color-surface-container-highest));
-    --_content: var(--md-sys-color-on-surface);
+    --_content: var(--button-tonal-content, var(--md-sys-color-on-surface));
   }
 
   .text {

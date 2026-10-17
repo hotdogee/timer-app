@@ -16,6 +16,10 @@ export default defineConfig(
     'test-results/',
     'playwright-report/',
     'blob-report/',
+    // Generated: Paraglide's compiled messages, vite-plugin-pwa's dev output, inlang's cache.
+    'src/paraglide/',
+    'dev-dist/',
+    'project.inlang/cache/',
   ]),
   js.configs.recommended,
   ts.configs.recommendedTypeChecked,

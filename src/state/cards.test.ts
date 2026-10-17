@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { cards, stopwatch, timer, type EpochMs, type TimerState } from '../core'
+import { setAppLocale } from '../i18n'
 import { cardStore, createCardStore, type CardStore } from './cards.svelte'
 
 // The app singleton reads ids from the platform layer; keep this test independent of it.
@@ -13,7 +14,10 @@ const MINUTE = 60 * SECOND
 const NOW = Date.UTC(2026, 9, 17, 14, 47, 0)
 
 /** A store with counting ids ('id1', 'id2', …), a clock fixed at `createdAt`, and a scripted `now`. */
-function setup(ids: () => string = counter()): {
+function setup(
+  ids: () => string = counter(),
+  defaultName?: (kind: cards.CardKind) => string,
+): {
   store: CardStore
   bumps: () => number
   setNow: (at: EpochMs) => void
@@ -27,6 +31,7 @@ function setup(ids: () => string = counter()): {
       bumps++
       return now
     },
+    ...(defaultName ? { defaultName } : {}),
   })
   return {
     store,
@@ -94,6 +99,42 @@ describe('adding cards', () => {
     expect(tea2).not.toBe(tea)
     expect(store.addStopwatch('Laps')).toBe('id4')
     expect(store.selected?.name).toBe('Laps')
+  })
+
+  it('numbers new cards from the default names the deps give (localized names)', () => {
+    const names: Record<cards.CardKind, string> = {
+      timer: 'タイマー',
+      stopwatch: 'ストップウォッチ',
+    }
+    const { store } = setup(counter(), (kind) => names[kind])
+    store.addTimer()
+    store.addTimer()
+    store.addStopwatch()
+    store.addTimer(undefined, '  ')
+    store.addTimer(3 * MINUTE, 'Tea')
+    expect(store.cards.map((card) => card.name)).toEqual([
+      'タイマー',
+      'タイマー 2',
+      'ストップウォッチ',
+      'タイマー 3',
+      'Tea',
+    ])
+  })
+
+  it('reads the default name for each new card, so a language switch applies to the next one', () => {
+    let name = 'Timer'
+    const { store } = setup(counter(), () => name)
+    store.addTimer()
+    name = '計時器'
+    store.addTimer()
+    expect(store.cards.map((card) => card.name)).toEqual(['Timer', '計時器'])
+  })
+
+  it('falls back to the built-in default names when the deps give a blank one', () => {
+    const { store } = setup(counter(), () => ' ')
+    store.addTimer()
+    store.addStopwatch()
+    expect(store.cards.map((card) => card.name)).toEqual(['Timer', 'Stopwatch'])
   })
 
   it('keeps ids unique even when the id source repeats itself', () => {
@@ -367,14 +408,30 @@ describe('replace', () => {
 })
 
 describe('cardStore', () => {
-  it('starts as on first run: one selected 5:00 "Timer"', () => {
-    expect(cardStore.cards).toHaveLength(1)
-    const card = cardStore.selected
-    expect(card?.id).toBe('first-run')
-    expect(card?.name).toBe('Timer')
-    expect(card?.kind === 'timer' ? card.timer : null).toEqual({
-      phase: 'idle',
-      duration: 5 * MINUTE,
-    })
+  it('starts empty: startAppData loads the cards and adds the first-run timer', () => {
+    expect(cardStore.list).toBe(cards.EMPTY_LIST)
+  })
+
+  it('takes ids from the platform and names cards with the built-in default names', () => {
+    const id = cardStore.addTimer()
+    expect(id).toBe('first-run')
+    expect(cardStore.selected?.name).toBe('Timer')
+    cardStore.remove(id)
+  })
+
+  it('names new cards in the UI language', () => {
+    try {
+      setAppLocale('ja')
+      const timerId = cardStore.addTimer()
+      const stopwatchId = cardStore.addStopwatch()
+      expect(cardStore.cards.map((card) => card.name)).toEqual(['タイマー', 'ストップウォッチ'])
+      setAppLocale('zh-TW')
+      const secondId = cardStore.addTimer()
+      expect(cardStore.selected?.name).toBe('計時器')
+      for (const id of [timerId, stopwatchId, secondId]) cardStore.remove(id)
+      expect(cardStore.cards).toEqual([])
+    } finally {
+      setAppLocale('en')
+    }
   })
 })

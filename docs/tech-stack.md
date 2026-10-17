@@ -23,18 +23,18 @@ One TypeScript web codebase, shipped two ways:
 | Styling | Plain CSS, custom properties as design tokens, container queries | Runtime theming is a variable swap with no re-render. Each card scales from its own container size, phone to 4K. |
 | Color | `@material/material-color-utilities` | Builds Material 3 light and dark palettes from one seed color, with valid contrast. The default seed is the OS accent color (read through the platform interface), falling back to Google blue `#0B57D0`. Browsers return a fixed value for the CSS `AccentColor` keyword to prevent fingerprinting, so the web always uses the fallback; desktop reads the real accent through Tauri. The default seed's theme is precomputed into `src/ui/theme/default-theme.css` (a Vitest file snapshot; regenerate with `pnpm test -u`), so the color library (about 20 kB gzip) loads lazily and only for another seed. |
 | Icons | Material Symbols (SVG, Apache 2.0) | Matches the card design. |
-| Fonts | Roboto Flex (default) and Inter, variable, self-hosted via `@fontsource-variable` | Variable weight makes a font-weight setting cheap. Digits use `tabular-nums`. |
+| Fonts | Roboto Flex (default) and Inter, variable, self-hosted via `@fontsource-variable` | Variable weight makes a font-weight setting cheap. Digits use `tabular-nums`. A per-language CJK fallback stack (`--font-cjk`) sits before `system-ui`, so Japanese never falls into a Chinese font. |
 | Sound | Web Audio, synthesized | Built-in chime, bell and beep are generated in code: no audio assets, no licensing. Custom files are decoded with the same API. |
-| i18n | Paraglide JS + `Intl` | Compiled, type-safe, tree-shaken messages. `Intl` handles times, numbers and plurals per locale. |
+| i18n | Paraglide JS + `Intl` | Compiled, type-safe, tree-shaken messages. `Intl` handles times, numbers and plurals per locale. Messages live in `messages/{locale}.json` and compile to `src/paraglide/` (generated, not committed; `pnpm i18n:compile` runs before `check` and `test`). |
 | Keyboard | Own keymap layer (may use `tinykeys`) | Every shortcut is rebindable and stored in settings. |
-| Data store | TinyBase, persisted to IndexedDB | Two stores: a synced `MergeableStore` (cards, behavior settings) and a device-only store (appearance). IndexedDB works in the browser and in the Tauri webview. |
+| Data store | TinyBase | Two stores: a synced `MergeableStore` (cards, presets, behavior settings) persisted to IndexedDB, and a device-only `Store` (appearance, language) persisted to localStorage, which is readable synchronously before the first paint. Both work in the browser and in the Tauri webview. Browser tabs stay in step through TinyBase's BroadcastChannel synchronizer. |
 | Schemas | Valibot with versioned migrations | Validates settings and imported data. |
 | Sync | TinyBase `MergeableStore` over WebSocket | Per-field newest-wins merge with hybrid logical clocks. The local store stays the source of truth. |
 | Server | Cloudflare Workers + Durable Objects | One Durable Object per user holds their store in its built-in SQLite. Idle connections hibernate and cost nothing. See [Server](#server). |
 | Auth | Better Auth on D1 (Drizzle or Kysely adapter) | Runs in our Worker: email code, Google, Apple, GitHub. |
 | Email | Resend | Sends sign-in codes; called from the Worker with `fetch`. |
-| Offline / install | `vite-plugin-pwa` (Workbox) | |
-| Unit tests | Vitest with fake timers | Timer engine, digit-entry parser, migrations. |
+| Offline / install | `vite-plugin-pwa` (Workbox `generateSW`, prompt mode) | Precaches the app, fonts and icons (about 610 KB); an update shows the "Update ready" snackbar. Not registered inside Tauri. |
+| Unit tests | Vitest with fake timers; a `client` project (jsdom, fake-indexeddb, browser conditions) for rune-based modules | Timer engine, digit-entry parser, migrations, stores and persisters, settings dialog. |
 | E2E tests | Playwright (Chromium) | Keyboard flows, alarm orchestration, focus, responsive breakpoints, frame-loop checks; the page clock is faked, so timing tests are exact. Locally they run against the dev server, in CI against the production build. Light/dark screenshots are saved as artifacts, not pixel-asserted, because CI runs Linux and development runs Windows. |
 | CI / release | GitHub Actions + `tauri-action` | Builds and signs for all three desktop OSes. |
 
@@ -76,15 +76,18 @@ src/
   core/       Pure TS, no DOM, no framework: timer and stopwatch engines, digit-entry parser, formatting, frame ticker, card model, keymap, settings schema
   platform/   One interface, two implementations (web, tauri): accent color, notifications, audio, wake timer, fullscreen, ids, windows, hotkeys
   state/      Reactive app state (.svelte.ts): card store, alarm orchestration, keyboard controller, shared timer actions (apply typed digits, then act), presets
-  sync/       TinyBase stores (synced and device-only), IndexedDB persisters, WebSocket synchronizer, server-time offset
-  ui/         Components: theme (tokens, generated M3 scheme), primitives, card, grid, command palette, cheat sheet
-  i18n/       Messages
+  sync/       TinyBase stores (synced and device-only), IndexedDB and localStorage persisters, tab sync, first-run seed, cards bridge; WebSocket synchronizer and server-time offset come in M4
+  ui/         Components: theme (tokens, generated M3 scheme), primitives, card, grid, command palette, cheat sheet, settings dialog
+  i18n/       Locale state and reactive messages (compiled messages in src/paraglide, generated)
+  pwa/        Service worker registration and the update prompt (web only)
+messages/     Translations: en.json, zh-TW.json, ja.json
+public/       PWA icons and the favicon
 e2e/          Playwright tests
 src-tauri/    Rust shell and plugins
 server/       Cloudflare Worker: auth routes, sync endpoint, per-user Durable Object
 ```
 
-Status after M2 (2026-10-18): `src/core`, `src/platform` (web implementations only), `src/state`, `src/ui` (theme, primitives, card, grid, palette, cheat sheet, announcer), `e2e/` and `src-tauri` exist, with tests next to each module. `sync/`, `i18n/` and `server/` are planned; the Tauri side of `platform/` comes in M5.
+Status after M3 (2026-10-18): `src/core`, `src/platform` (web implementations only), `src/state`, `src/sync` (stores, persisters, tab sync, first-run seed, cards bridge), `src/i18n`, `src/pwa`, `src/ui` (theme, primitives, card, grid, palette, cheat sheet, announcer, settings), `messages/`, `public/`, `e2e/` and `src-tauri` exist, with tests next to each module. `server/` and the WebSocket synchronizer are planned for M4; the Tauri side of `platform/` comes in M5.
 
 Principles:
 
@@ -173,3 +176,5 @@ Bundle identifier: `com.timerapp.dev` is a placeholder until the final name is c
 - 2026-10-17: MIT license. Channels: GitHub Releases, winget, Homebrew, Microsoft Store. Email: Resend.
 - 2026-10-17: M1 done. Scaffolded pnpm 12, Vite 8, Svelte 5.57, TypeScript 6.0, Vitest 5, ESLint 10, Prettier, GitHub Actions CI. Implemented `src/core` (timer, stopwatch, digit entry, format, ticker; 641 tests), Tauri 2.12 scaffold (`cargo check` clean), dev harness. Removed the `store` plugin from the plan; TinyBase holds all data.
 - 2026-10-18: M2 done. Material 3 timer and stopwatch cards, responsive grid with edit mode and drag or keyboard reorder, rebindable keymap and keyboard controller, command palette, cheat sheet, alarm orchestration (synthesized sounds, notifications, wake worker), fullscreen with overlay fallback, Playwright e2e (50 tests) in CI; 1371 unit tests. Card colors use palette tones instead of `surface-container`; the default theme is precomputed; build target raised to Chrome 105 / Safari 16.
+- 2026-10-18: M3 planned. The device-only store moves from IndexedDB to localStorage (synchronous read before the first paint). Vitest gains a `client` project (jsdom, browser conditions) for rune-based modules. Placeholder PWA icon (spec Q22).
+- 2026-10-18: M3 done. TinyBase 10 synced `MergeableStore` on IndexedDB (3 s open timeout, memory fallback, never seeds over another tab) and a device store on localStorage, tabs in step over BroadcastChannel; Valibot settings and export schemas with migrations; settings dialog (appearance, behavior, keyboard rebinding, presets editor, data export/import, about) in a lazy chunk; Paraglide JS 2 messages for en, zh-TW and ja with live switching and per-language CJK font stacks; `vite-plugin-pwa` with a placeholder icon set; Vitest `client` project; 1903 unit tests, 79 Playwright tests. Bundle: main 89 kB gzip, settings 22 kB lazy, color library 20 kB lazy; rolldown `manualPureFunctions` drops unused TinyBase modules.

@@ -1,4 +1,9 @@
-/** Shared UI building blocks: Material 3 controls styled with the theme tokens. */
+/**
+ * Shared UI building blocks: Material 3 controls styled with the theme tokens. The settings
+ * dialog's controls (SegmentedButtons, Select, Slider, Switch, TextField) are imported by path, not
+ * from here: a Svelte module with styles is never tree-shaken, so a re-export here would put them
+ * in the startup chunk of every page that imports this barrel.
+ */
 export { default as Button } from './Button.svelte'
 export { default as Chip } from './Chip.svelte'
 export { default as Dialog } from './Dialog.svelte'

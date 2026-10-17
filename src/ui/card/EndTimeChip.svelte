@@ -1,7 +1,8 @@
 <!--
   @component
   A running timer's end time under its digits: a bell and the wall-clock time it will ring
-  ("🔔 2:47 PM"), in the locale's 12/24-hour style. Not interactive.
+  ("🔔 2:47 PM"), in the app locale's 12/24-hour style (the browser's own variant of it, such as
+  en-GB), unless the 12/24-hour setting says otherwise. Not interactive.
 
   ```svelte
   <EndTimeChip at={state.endsAt} />
@@ -9,7 +10,10 @@
 -->
 <script lang="ts">
   import { formatClockTime, type EpochMs } from '../../core'
+  import { browserLanguages, localeState, m } from '../../i18n'
+  import { settingsStore } from '../../state/settings.svelte'
   import { Icon } from '../primitives'
+  import { clockHourCycle, clockLocale } from './display'
 
   interface Props {
     /** When the timer ends. */
@@ -18,12 +22,14 @@
 
   let { at }: Props = $props()
 
-  const time = $derived(formatClockTime(at))
+  const locale = $derived(clockLocale(localeState.current, browserLanguages()))
+  const hourCycle = $derived(clockHourCycle(settingsStore.synced.hourCycle))
+  const time = $derived(formatClockTime(at, { locale, hourCycle }))
 </script>
 
 <span class="end-time" data-testid="end-time">
   <Icon name="notifications" />
-  <span><span class="visually-hidden">Ends at&nbsp;</span>{time}</span>
+  <span><span class="visually-hidden">{m.card_ends_at()}&nbsp;</span>{time}</span>
 </span>
 
 <style>
