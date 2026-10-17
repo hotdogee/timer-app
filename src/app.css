@@ -1,0 +1,162 @@
+/* Dev-harness styles: legible and theme-aware, nothing more. The designed card is milestone 2. */
+
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: Canvas;
+  color: CanvasText;
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+main {
+  display: grid;
+  justify-items: center;
+  gap: 1.5rem;
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+h1 small {
+  font-size: 0.875rem;
+  font-weight: normal;
+  color: GrayText;
+}
+
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.5rem;
+  width: 100%;
+}
+
+.card {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  flex: 1 1 18rem;
+  max-width: 26rem;
+  padding: 1.5rem;
+  border: 1px solid GrayText;
+  border-radius: 1rem;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.display {
+  font-size: clamp(2.5rem, 12vw, 4rem);
+  font-weight: 300;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Typed digits are not a duration yet: mark them as an edit in progress. */
+.display.editing {
+  text-decoration: underline dotted;
+  text-underline-offset: 0.15em;
+}
+
+.status {
+  min-height: 1.5em;
+  margin: 0;
+}
+
+progress {
+  width: 100%;
+}
+
+.controls,
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.controls button {
+  flex: 1;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  border: 1px solid GrayText;
+  border-radius: 999px;
+  background: ButtonFace;
+  color: ButtonText;
+  cursor: pointer;
+}
+
+button:disabled {
+  color: GrayText;
+  cursor: default;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.25rem 0.5rem;
+  text-align: end;
+}
+
+th:first-child,
+td:first-child {
+  text-align: start;
+}
+
+tr.current {
+  font-weight: 600;
+}
+
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.875rem;
+  color: GrayText;
+}
+
+kbd {
+  padding: 0 0.3em;
+  border: 1px solid GrayText;
+  border-radius: 0.25rem;
+  font-family: inherit;
+}
