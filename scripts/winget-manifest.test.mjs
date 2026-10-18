@@ -440,7 +440,8 @@ describe('the CLI', () => {
       },
     })
     expect(warned.code).toBe(0)
-    expect(warned.err).toMatch(/^Manifest Warning: …$/m)
+    // Under GitHub Actions the line becomes an annotation (`::warning::…`).
+    expect(warned.err).toMatch(/^(::warning::)?Manifest Warning: …$/m)
     expect(warned.err).not.toMatch(/winget validate failed/)
     const failed = await run(['--placeholder', '--out', 'out', '--validate'], {
       root,
