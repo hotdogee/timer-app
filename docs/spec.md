@@ -191,7 +191,7 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 | M3 | TinyBase stores on IndexedDB, settings and themes, i18n (en, zh-TW, ja), PWA | Done 2026-10-18 |
 | M4 | Sync server on Cloudflare Workers, Better Auth, sign-in flows | Done 2026-10-18 |
 | M5 | Desktop: tray, background alarms, mini window, global hotkeys, updater, autostart | Done 2026-10-18 |
-| M6 | Release: signing, CI builds, GitHub Releases, winget, Homebrew, Microsoft Store | Done 2026-10-18 (pipeline; the first release waits on the owner's checklist in [release.md](release.md)) |
+| M6 | Release: signing, CI builds, GitHub Releases, winget, Homebrew, Microsoft Store | Done 2026-10-18 (v0.1.0 published the same day; winget, Homebrew and the Store wait on the owner's accounts, see [release.md](release.md)) |
 
 ## Open questions
 

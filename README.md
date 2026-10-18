@@ -15,8 +15,7 @@ sync across devices through our own server, a Cloudflare Worker in `server/`.
 
 ## Install
 
-The first release is not out yet: until it is, run the app from source ([Getting
-started](#getting-started)). Then:
+The current release is on [GitHub Releases](https://github.com/hotdogee/timer-app/releases/latest); to run from source instead, see [Getting started](#getting-started).
 
 - **Web**: open the web app (its address comes with the final name, spec Q13) and install it from
   the browser (the install button in the address bar of Chrome and Edge; Share › Add to Dock or
