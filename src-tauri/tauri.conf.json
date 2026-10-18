@@ -24,12 +24,20 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.githubusercontent.com https://*.googleusercontent.com; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://timer.example.com wss://timer.example.com; worker-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+      "dangerousDisableAssetCspModification": false
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "msi", "dmg", "app", "appimage", "deb", "rpm"],
+    "publisher": "Han Lin",
+    "copyright": "Copyright © 2026 Han Lin",
+    "category": "Utility",
+    "shortDescription": "A keyboard-first timer and stopwatch.",
+    "longDescription": "Timers and stopwatches, keyboard first: type a duration and press Enter, run as many cards as you like side by side, float one above other apps, and let alarms ring from the tray. An optional account syncs your cards across devices.",
+    "homepage": "https://github.com/hotdogee/timer-app",
+    "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,10 +45,30 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "TradChinese", "Japanese"]
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      },
+      "deb": {
+        "recommends": ["gstreamer1.0-plugins-good"]
+      },
+      "rpm": {
+        "recommends": ["gstreamer1-plugins-good"]
+      }
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
-    },
-    "createUpdaterArtifacts": true
+    }
   },
   "plugins": {
     "updater": {

@@ -113,6 +113,9 @@
   const initial = $derived(
     ((displayName === '' ? user?.email : displayName) ?? '?').charAt(0).toUpperCase(),
   )
+  /** The picture that failed to load (blocked, gone or offline): the initial stands in for it. */
+  let failedImage = $state<string | null>(null)
+  const image = $derived(user?.image && user.image !== failedImage ? user.image : null)
   const status = $derived(sync?.status ?? 'off')
   const lastSyncAt = $derived(sync?.lastSyncAt ?? null)
   const statusText = $derived(syncStatusText(status, lastSyncAt, reading, localeState.current))
@@ -238,14 +241,17 @@
       },
     )}
   >
-    {#if user.image}
+    {#if image !== null}
       <img
         class="avatar"
-        src={user.image}
+        src={image}
         alt=""
         width="48"
         height="48"
         referrerpolicy="no-referrer"
+        onerror={() => {
+          failedImage = image
+        }}
       />
     {:else}
       <span class="avatar initial" aria-hidden="true">{initial}</span>

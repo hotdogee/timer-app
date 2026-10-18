@@ -1,0 +1,11 @@
+# Bumps the commit pins of the workflows' actions (each `uses:` names a commit, with its version in
+# the comment) once a week, as pull requests that CI checks like any other.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']

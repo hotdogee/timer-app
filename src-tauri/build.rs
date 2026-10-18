@@ -13,6 +13,9 @@ const COMMANDS: &[&str] = &[
     "set_tray_labels",
     "quote_launch_entry",
     "updater_configured",
+    "token_get",
+    "token_set",
+    "token_clear",
     "smoke_mark",
 ];
 

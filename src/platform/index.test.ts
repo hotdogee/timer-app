@@ -51,6 +51,7 @@ describe('platform', () => {
       platform.updater,
       platform.activity,
       platform.opener,
+      platform.tokens,
       platform.shell,
     ]) {
       expect(service).toBeTypeOf('object')
@@ -59,7 +60,15 @@ describe('platform', () => {
 
   it('has no desktop services on the web, and every call on them resolves harmlessly', async () => {
     const p = createPlatform('web')
-    for (const service of [p.windows, p.hotkeys, p.autostart, p.updater, p.activity, p.shell]) {
+    for (const service of [
+      p.windows,
+      p.hotkeys,
+      p.autostart,
+      p.updater,
+      p.activity,
+      p.tokens,
+      p.shell,
+    ]) {
       expect(service.supported).toBe(false)
     }
     const render = vi.fn(() => () => undefined)
@@ -91,6 +100,10 @@ describe('platform', () => {
     p.shell.onMiniCard(() => undefined)()
     p.shell.smokeMark('ringing')
     expect(p.accent.onChange?.(() => undefined)).toBeTypeOf('function')
+
+    await expect(p.tokens.get()).resolves.toBeNull()
+    await expect(p.tokens.set({ token: 'token', expiresAt: 1 })).resolves.toBe(false)
+    await expect(p.tokens.clear()).resolves.toBe(false)
   })
 
   it('picks the desktop services for the Tauri webview, which touch nothing until used', () => {
@@ -104,6 +117,7 @@ describe('platform', () => {
       p.updater,
       p.activity,
       p.opener,
+      p.tokens,
       p.shell,
     ]) {
       expect(service.supported).toBe(true)

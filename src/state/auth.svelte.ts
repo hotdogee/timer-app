@@ -18,16 +18,17 @@
  * The desktop app has no cookie (the API is on another origin): it signs in through the browser
  * with the device authorization flow (`startDeviceSignIn`: a code to approve on the `/device`
  * page, then polling for the token, RFC 8628) or with an emailed code, keeps the session token in
- * the device store (`settingsStore.auth`, through {@link TokenStore}) and sends it as a bearer
- * token with every request (`tokenProvider`; {@link bearerToken} for the sync socket). Signing
- * out, deleting the account, or the server no longer knowing the token removes it.
+ * the OS credential store (`platform.tokens`; the device store, `settingsStore.auth`, where that
+ * store is unavailable; see {@link createCredentialTokens}) and sends it as a bearer token with
+ * every request (`tokenProvider`; {@link bearerToken} for the sync socket). Signing out, deleting
+ * the account, or the server no longer knowing the token removes it.
  */
 import { createAuthClient } from 'better-auth/client'
 import { deviceAuthorizationClient, emailOTPClient } from 'better-auth/client/plugins'
 import { untrack } from 'svelte'
 
 import type { Clock, EpochMs, settings } from '../core'
-import { platform } from '../platform'
+import { platform, type TokenStore as CredentialStore } from '../platform'
 import { apiOrigin, apiUrl } from '../sync/api'
 import {
   API_PATHS,
@@ -157,13 +158,98 @@ export interface AuthStore {
 }
 
 /**
- * Where a client without the session cookie (the desktop app) keeps its bearer token: the device
- * store's `auth` group in the app. The token may have expired; see {@link usableToken}.
+ * Where a client without the session cookie (the desktop app) keeps its bearer token: the OS
+ * credential store in the app ({@link createCredentialTokens}). The token may have expired; see
+ * {@link usableToken}.
  */
 export interface TokenStore {
   readonly current: settings.DeviceAuth | null
   /** Stores a token, or removes it (null). */
   set(auth: settings.DeviceAuth | null): void
+  /**
+   * For a store that reads its token asynchronously: loads it, once (later calls resolve with the
+   * first); `current` is null until then. No session check goes before it settles, or the
+   * server's "nobody" would sign the device out. Never rejects.
+   */
+  load?(): Promise<void>
+}
+
+/**
+ * The desktop app's token store (M6): the token lives in the OS credential store (`credentials`)
+ * and in memory, for the synchronous reads (every request's bearer header, the sync socket);
+ * {@link TokenStore.load} reads it. Writes reach the OS store in order, in the background.
+ *
+ * The device store (`fallback`, where M5 kept the token) takes over where the OS store is
+ * unavailable or fails, as `credentials.supported` turning false says (the platform logs that
+ * once): a token being written then goes there. A token the device store holds at load moves into
+ * the OS store, once, and leaves the device store: kept there by an M5 build, or by a run whose OS
+ * store failed, it is the newest the app wrote, so it replaces any the OS store holds. Removing the
+ * token removes it from both.
+ */
+export function createCredentialTokens(
+  credentials: CredentialStore,
+  fallback: TokenStore,
+): TokenStore {
+  let held = $state.raw<settings.DeviceAuth | null>(null)
+  /** Where the token lives: not known until loaded, then the OS store or the device store. */
+  let home: 'unknown' | 'os' | 'device' = 'unknown'
+  /** Whether `set` ran: a sign-in or sign-out during the load wins over what it read. */
+  let changed = false
+  let loading: Promise<void> | null = null
+
+  /** The device store takes over, with the latest token. */
+  function moveToDevice(): void {
+    home = 'device'
+    fallback.set(held)
+  }
+
+  async function read(): Promise<void> {
+    const stored = await credentials.get()
+    if (!credentials.supported) {
+      // The OS store is unavailable: the device store keeps the token, as before M6.
+      if (changed) moveToDevice()
+      else {
+        home = 'device'
+        held = fallback.current
+      }
+      return
+    }
+    home = 'os'
+    const legacy = fallback.current
+    if (changed) {
+      // The write that `set` queued follows this read; an older token in the device store goes.
+      if (legacy !== null) fallback.set(null)
+      return
+    }
+    if (legacy === null) {
+      held = stored
+      return
+    }
+    held = legacy
+    if (await credentials.set(legacy)) fallback.set(null)
+    // The OS store refused it: it stays where it is.
+    else if (!changed) home = 'device'
+  }
+
+  return {
+    get current() {
+      return home === 'device' ? fallback.current : held
+    },
+    set(auth) {
+      held = auth
+      changed = true
+      // Untracked: a write from an effect must not make it follow the device store.
+      if (auth === null && untrack(() => fallback.current) !== null) fallback.set(null)
+      if (home === 'device') {
+        if (auth !== null) fallback.set(auth)
+        return
+      }
+      void (auth === null ? credentials.clear() : credentials.set(auth)).then((stored) => {
+        if (!stored) moveToDevice()
+      })
+    },
+    load: () => (loading ??= read()),
+  }
 }
 
 /** A stored token's text while it has not expired at `now`, else null. */
@@ -853,18 +939,25 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
     start() {
       if (stopWatching) return stopWatching
       takeOAuthError()
-      const unwatch = backend.watchSession(follow)
-      void loadConfig()
+      let unwatch: (() => void) | null = null
       const stop = (): void => {
         if (stopWatching !== stop) return
         stopWatching = null
-        unwatch()
+        unwatch?.()
       }
       stopWatching = stop
+      const watch = (): void => {
+        if (stopWatching === stop) unwatch = backend.watchSession(follow)
+      }
+      // The session check goes with the stored token, so it waits for the store to load it.
+      if (tokens?.load) void tokens.load().then(watch)
+      else watch()
+      void loadConfig()
       return stop
     },
 
     async refresh() {
+      if (tokens?.load) await tokens.load()
       await Promise.all([backend.refreshSession().catch(() => undefined), loadConfig()])
     },
 
@@ -964,19 +1057,20 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
 }
 
 /**
- * The desktop app's token store: the device store's `auth` group (`settingsStore.auth`). None on
+ * The desktop app's token store: the OS credential store, with the device store's `auth` group
+ * (`settingsStore.auth`) where that is unavailable (see {@link createCredentialTokens}). None on
  * the web, which has the session cookie.
  */
 const appTokens: TokenStore | null =
   __DESKTOP__ && platform.kind === 'tauri'
-    ? {
+    ? createCredentialTokens(platform.tokens, {
         get current() {
           return settingsStore.auth
         },
         set(auth) {
           settingsStore.setAuth(auth)
         },
-      }
+      })
     : null
 
 /**

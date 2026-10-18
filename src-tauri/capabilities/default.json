@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window: the whole app, the app's commands, and the desktop plugins it drives (notifications, global hotkeys, launch at login, updates, opening the sign-in page and links in the browser).",
+  "description": "The main window: the whole app, the app's commands, and the desktop plugins it drives (notifications, global hotkeys, launch at login, updates, opening the sign-in page and the project's links in the browser), and the sign-in token in the OS credential store.",
   "windows": ["main"],
   "platforms": ["windows", "macOS", "linux"],
   "permissions": [
@@ -23,7 +23,9 @@
       "allow": [
         { "url": "http://localhost:5173/device*" },
         { "url": "http://localhost:8787/device*" },
-        { "url": "https://**" }
+        { "url": "https://timer.example.com/device*" },
+        { "url": "https://github.com/hotdogee/timer-app" },
+        { "url": "https://github.com/hotdogee/timer-app/**" }
       ]
     },
     "allow-accent-color",
@@ -34,6 +36,9 @@
     "allow-set-mini-always-on-top",
     "allow-set-tray-labels",
     "allow-quote-launch-entry",
-    "allow-updater-configured"
+    "allow-updater-configured",
+    "allow-token-get",
+    "allow-token-set",
+    "allow-token-clear"
   ]
 }

@@ -1,6 +1,6 @@
 # Deploying
 
-How to put the web app and its sync server on Cloudflare. Nothing in this repository deploys by itself: this guide is the one-time setup, and then a deploy per release (by hand or with the manual GitHub Actions workflow). Local development needs none of it; see [README › Sync server](../README.md#sync-server).
+How to put the web app and its sync server on Cloudflare. Nothing in this repository deploys by itself: this guide is the one-time setup, and then a deploy per release (by hand, or started by the release workflow once the deploy secret or the variable `DEPLOY_ON_RELEASE` is set; see [release.md](release.md)). Local development needs none of it; see [README › Sync server](../README.md#sync-server).
 
 What runs in production is one Worker, `timer-app` (`server/`, configured in `server/wrangler.jsonc`):
 
@@ -172,7 +172,7 @@ The rule only applies to the custom domain, not to the `workers.dev` address: tu
 
 ## Deploying from GitHub Actions
 
-`.github/workflows/deploy.yml` runs by hand only, and only on `main`: Actions › Deploy › Run workflow. It installs, runs the Worker tests, builds the web app, applies new D1 migrations (`pnpm server:migrate:remote`) and deploys (`pnpm server:deploy`). The Worker's secrets stay as set in step 3; the workflow does not touch them.
+`.github/workflows/deploy.yml` runs on `main` only, started by hand (Actions › Deploy › Run workflow) or by the release workflow once it has published a release ([release.md](release.md)). Its input `ref` picks what to deploy: empty is the head of `main`; a release tag `vX.Y.Z` (the release passes its own) is checked out and must be on `main`. The release starts it when the repository secret `CLOUDFLARE_API_TOKEN` exists or the repository variable `DEPLOY_ON_RELEASE` is `true`, which is needed when the secrets live in the `production` environment below, since the release workflow cannot see those. It installs, runs the Worker tests, builds the web app, applies new D1 migrations (`pnpm server:migrate:remote`) and deploys (`pnpm server:deploy`). The Worker's secrets stay as set in step 3; the workflow does not touch them.
 
 The job runs in the `production` environment (Settings › Environments, created on the first run). Put the two secrets there, rather than as repository secrets, and add a required reviewer to have every deploy approved. Only the migrate and deploy steps see them: installing, testing and building run without the token. The actions are pinned to commits.
 
@@ -181,7 +181,7 @@ It needs two secrets (the `production` environment's, or the repository's under 
 - `CLOUDFLARE_ACCOUNT_ID`: from the dashboard (Workers & Pages overview, or the URL).
 - `CLOUDFLARE_API_TOKEN`: My Profile › API Tokens › Create Token › the "Edit Cloudflare Workers" template, plus Account › D1 › Edit (for the migrations). With a custom domain in `wrangler.jsonc`, include that domain's zone in the template's zone resources.
 
-The workflow deploys the commit it runs on, with the `database_id` and routes committed in `wrangler.jsonc`.
+The workflow deploys the head of `main`, or the release tag given as `ref`, with the `database_id` and routes committed in `wrangler.jsonc`.
 
 ## Later releases
 

@@ -409,6 +409,17 @@ describe('signed in', () => {
     expect(text(query(target, '.who'))).toBe('Signed in as ada@example.com')
   })
 
+  it('shows the initial instead of a picture that does not load', async () => {
+    const { target } = await setup({
+      status: 'signed-in',
+      user: { id: 'u1', email: 'ada@example.com', name: null, image: 'https://example.com/a.png' },
+    })
+    query<HTMLImageElement>(target, 'img.avatar').dispatchEvent(new Event('error'))
+    await settle()
+    expect(target.querySelector('img.avatar')).toBeNull()
+    expect(text(query(target, '.initial'))).toBe('A')
+  })
+
   it('follows every sync status', async () => {
     const { target, sync } = await setup(SIGNED_IN)
     const line = () => text(query(target, '.sync'))

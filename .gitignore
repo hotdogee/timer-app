@@ -45,3 +45,12 @@ dev-dist
 .env.*
 .wrangler
 .wrangler-dry
+
+# Signing material (docs/release.md › Secrets): certificates, keys and their base64 copies belong in
+# a password manager and in the repository's secrets, never in a commit.
+*.p12
+*.pfx
+*.p8
+*.cer
+*.key
+certificate-base64.txt

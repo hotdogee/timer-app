@@ -13,7 +13,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "i18n:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/paraglide --strategy globalVariable baseLocale --emit-ts-declarations",
-    "icons": "pwa-assets-generator",
+    "icons": "pwa-assets-generator && tauri icon public/icon.svg && node -e \"for (const d of ['android', 'ios']) require('node:fs').rmSync('src-tauri/icons/' + d, { recursive: true, force: true })\"",
     "check": "pnpm i18n:compile && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.node.json && tsc -p e2e/tsconfig.json && pnpm --filter @timer-app/server run types:check && tsc -p server/tsconfig.json",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
@@ -28,7 +28,9 @@
     "server:migrate:remote": "pnpm --filter @timer-app/server run migrate:remote",
     "server:types": "pnpm --filter @timer-app/server run types",
     "server:deploy": "pnpm --filter @timer-app/server run deploy",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release": "node scripts/release.mjs",
+    "version:check": "node scripts/release.mjs --check"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -43,7 +45,6 @@
     "@tauri-apps/plugin-opener": "^2.7.2",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.0",
-    "@tauri-apps/plugin-window-state": "^2.5.0",
     "better-auth": "^1.7.10",
     "svelte": "^5.57.2",
     "tinybase": "^10.0.1",

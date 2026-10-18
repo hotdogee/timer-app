@@ -16,20 +16,23 @@ concurrency:
 jobs:
   web:
     name: Check, lint, test, build, e2e
-    runs-on: ubuntu-latest
+    # Pinned images (never -latest), so an image migration cannot change CI under us.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Installs the pnpm version pinned in package.json's packageManager field.
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+      # package.json, tauri.conf.json, Cargo.toml and Cargo.lock agree on the version.
+      - run: pnpm version:check
       - run: pnpm check
       - run: pnpm lint
       - run: pnpm test
@@ -43,7 +46,7 @@ jobs:
       - run: pnpm test:e2e
 
       # Traces of failed tests, plus screenshots saved for review (not pixel-asserted).
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: playwright-test-results
@@ -53,29 +56,32 @@ jobs:
 
   rust:
     name: Desktop shell (Rust, Windows)
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 30
     defaults:
       run:
         shell: bash
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # No web build: a plain cargo build of the shell is a development build (no `custom-protocol`
       # feature), which serves the page from the dev server and never reads dist/. M6's
       # `tauri build` builds the web app first.
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the stable branch's commit: that fixes the action's code; rustup still installs
+      # the newest stable Rust (`toolchain`).
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
 
       # cargo-audit, prebuilt: RustSec advisories fail the job (accepted ones, with their reasons,
       # are in src-tauri/.cargo/audit.toml).
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-audit
 

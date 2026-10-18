@@ -1,0 +1,56 @@
+name: Bug report
+description: Something in Timer App does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please search the open issues first. Leave out anything private:
+        sign-in codes, tokens, email addresses and exported data.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Type 90 on the selected timer
+        2. Press Enter
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Web app (browser or installed PWA)
+        - Windows app
+        - macOS app
+        - Linux app
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings › About shows it.
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and browser
+      placeholder: Windows 11, Edge
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output or screenshots
+      description: Errors from the browser's developer tools help a lot. Screenshots can be pasted here.

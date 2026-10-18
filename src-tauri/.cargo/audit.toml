@@ -6,8 +6,9 @@ ignore = [
   # zip 4.6.1, used only by tauri-plugin-updater 2.14.0 (the latest 2.x, which requires zip ^4;
   # fixed in zip >= 9.0.0): Unix permissions and symbolic links in an extracted archive. The
   # updater extracts an update only after its minisign signature has been verified against the
-  # app's public key, and this build has no key yet (updates are off until M6). Revisit when
-  # tauri-plugin-updater moves to zip >= 9.
+  # app's public key (plugins.updater.pubkey), so only an archive signed with the release key is
+  # ever extracted; until the owner adds that key (docs/release.md › Updater key), updates are off
+  # altogether. Revisit when tauri-plugin-updater moves to zip >= 9.
   "RUSTSEC-2026-0367",
   "RUSTSEC-2026-0368",
   "RUSTSEC-2026-0369",

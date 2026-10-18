@@ -1,8 +1,8 @@
 //! Tauri shell for Timer App. The web UI in `src/` does all the work; the shell adds what a
 //! browser cannot: one instance, a remembered window, a tray icon that keeps the app (and its
 //! alarms) running with the window closed, system notifications, global hotkeys, launch at login,
-//! self-update, the OS accent color, an always-on-top mini window and opening the system browser.
-//! See docs/tech-stack.md.
+//! self-update, the OS accent color, an always-on-top mini window, opening the system browser and
+//! keeping the sign-in token in the OS credential store. See docs/tech-stack.md.
 //!
 //! The webview talks to the shell through these commands (payload keys are camelCase):
 //!
@@ -17,6 +17,9 @@
 //! | `set_tray_labels` | `{ labels: { show, toggleLast, quit } }` | ([`tray`]) |
 //! | `quote_launch_entry` | none | boolean ([`autostart`]) |
 //! | `updater_configured` | none | boolean ([`updater`]) |
+//! | `token_get` | none | `{ token, expiresAt }` or `null`; rejects when the store fails ([`token_store`]) |
+//! | `token_set` | `{ auth: { token, expiresAt } }` | rejects when the store fails ([`token_store`]) |
+//! | `token_clear` | none | rejects when the store fails ([`token_store`]) |
 //! | `smoke_mark` | `{ message }` | none; debug builds only ([`smoke`]) |
 //!
 //! and these events: `accent-changed` (to every window), `tray-toggle-last` and `mini-closed`
@@ -35,6 +38,8 @@ pub mod autostart;
 pub mod mini;
 #[cfg(debug_assertions)]
 pub mod smoke;
+#[cfg(desktop)]
+pub mod token_store;
 #[cfg(desktop)]
 pub mod tray;
 pub mod updater;
@@ -201,6 +206,12 @@ pub fn run() {
             #[cfg(desktop)]
             autostart::quote_launch_entry,
             updater::updater_configured,
+            #[cfg(desktop)]
+            token_store::token_get,
+            #[cfg(desktop)]
+            token_store::token_set,
+            #[cfg(desktop)]
+            token_store::token_clear,
             #[cfg(debug_assertions)]
             smoke::smoke_mark,
         ])
@@ -320,6 +331,9 @@ mod tests {
             "set_tray_labels",
             "quote_launch_entry",
             "updater_configured",
+            "token_get",
+            "token_set",
+            "token_clear",
         ] {
             assert!(main.contains(&allow(command)), "{command}");
         }
@@ -429,6 +443,24 @@ mod tests {
             "http://localhost:8787/api/export",
             "http://example.com/device?user_code=WDJBMJHT",
             "file:///C:/Windows/System32/calc.exe",
+        ] {
+            assert!(!opens(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn the_browser_opens_no_other_https_page() {
+        // Only the production server's device page (a placeholder origin until the final domain,
+        // spec Q13) and the project's GitHub pages.
+        for url in [
+            "https://example.com/",
+            "https://timer.example.com/",
+            "https://timer.example.com/api/export",
+            "https://timer.example.com.evil.example/device?user_code=WDJBMJHT",
+            "https://evil.example/?https://timer.example.com/device",
+            "https://github.com/hotdogee",
+            "https://github.com/hotdogee/timer-app-fork",
+            "https://gist.github.com/hotdogee/timer-app",
         ] {
             assert!(!opens(url), "{url}");
         }
