@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Timer App",
   "version": "0.0.0",
-  "identifier": "com.timerapp.dev",
+  "identifier": "uk.hanlin.timer",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -47,6 +47,9 @@
     ],
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "wix": {
+        "upgradeCode": "66c8ac1b-ea67-5810-9223-735e7dac3c08"
+      },
       "nsis": {
         "installMode": "currentUser",
         "languages": ["English", "TradChinese", "Japanese"]

@@ -30,7 +30,7 @@
       "binding": "DB",
       "database_name": "timer-app-auth",
       // Local development works with this placeholder; paste the real id after `wrangler d1 create`.
-      "database_id": "REPLACE_AFTER_D1_CREATE",
+      "database_id": "5d2497ca-25f5-4cfa-8359-b39922b6ca0d",
       "migrations_dir": "migrations",
     },
   ],

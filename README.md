@@ -395,14 +395,13 @@ policy applied) can sign in and sync against `pnpm server:dev`.
   grant (`capabilities/debug/`, which `build.rs` reads only for debug builds) are not in release
   builds.
 
-Where a desktop install keeps its data (the bundle identifier is `com.timerapp.dev` until the
-final name, spec Q13):
+Where a desktop install keeps its data (the bundle identifier is `uk.hanlin.timer`):
 
-| What                                 | Windows                                     | macOS                                            | Linux                                      |
-| ------------------------------------ | ------------------------------------------- | ------------------------------------------------ | ------------------------------------------ |
-| Cards, settings (web storage)        | `%LOCALAPPDATA%\com.timerapp.dev\EBWebView` | WebKit's store for the app (`~/Library/WebKit`)  | `~/.local/share/com.timerapp.dev`          |
-| Sign-in token                        | Credential Manager, `sync-token.Timer App`  | Keychain, `Timer App` / `sync-token`             | Secret Service, `Timer App` / `sync-token` |
-| Window places (`.window-state.json`) | `%APPDATA%\com.timerapp.dev`                | `~/Library/Application Support/com.timerapp.dev` | `~/.config/com.timerapp.dev`               |
+| What                                 | Windows                                    | macOS                                           | Linux                                      |
+| ------------------------------------ | ------------------------------------------ | ----------------------------------------------- | ------------------------------------------ |
+| Cards, settings (web storage)        | `%LOCALAPPDATA%\uk.hanlin.timer\EBWebView` | WebKit's store for the app (`~/Library/WebKit`) | `~/.local/share/uk.hanlin.timer`           |
+| Sign-in token                        | Credential Manager, `sync-token.Timer App` | Keychain, `Timer App` / `sync-token`            | Secret Service, `Timer App` / `sync-token` |
+| Window places (`.window-state.json`) | `%APPDATA%\uk.hanlin.timer`                | `~/Library/Application Support/uk.hanlin.timer` | `~/.config/uk.hanlin.timer`                |
 
 ### Desktop smoke test
 

@@ -38,7 +38,7 @@
  * developer's own cards and settings are untouched; its sign-in token goes to a credential of its
  * own (`TIMER_APP_TOKEN_ACCOUNT`, read by debug builds only), removed at the start and the end, so
  * a developer's own debug sign-in is untouched too; the window state file
- * (`%APPDATA%\com.timerapp.dev\.window-state.json`) is backed up and put back afterwards.
+ * (`%APPDATA%\uk.hanlin.timer\.window-state.json`) is backed up and put back afterwards.
  *
  * Output (`--out`, default `test-results/smoke-desktop`): `report.md`, `report.json`, the
  * screenshots, and the logs of `tauri dev` and the sync server. Every process it starts is killed
@@ -68,7 +68,7 @@ const DEBUG_EXE = path.join(ROOT, 'src-tauri', 'target', 'debug', 'timer-app.exe
 const APP_ORIGIN = 'http://localhost:5173'
 const MAIN_URL = `${APP_ORIGIN}/`
 const SYNC_ORIGIN = 'http://127.0.0.1:8787'
-const WINDOW_STATE = path.join(process.env.APPDATA ?? '', 'com.timerapp.dev', '.window-state.json')
+const WINDOW_STATE = path.join(process.env.APPDATA ?? '', 'uk.hanlin.timer', '.window-state.json')
 /** WebView2's default switches in Tauri, kept when the smoke adds its own. */
 const WEBVIEW_DEFAULT_ARGS = '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection'
 /** Where run 1 leaves the main window (physical pixels), for run 2's restore check. */
