@@ -366,9 +366,8 @@ policy applied) can sign in and sync against `pnpm server:dev`.
 - **Updates**: the updater checks 10 s after launch and every 6 hours and offers "Update …
   available" with Install and restart; Settings › About has a Check for updates row. It reads
   `latest.json` from the newest GitHub Release and installs only an update signed with the key
-  whose public half is `plugins.updater.pubkey` in `tauri.conf.json`. Until that key is generated
-  ([docs/release.md](docs/release.md)), the config carries `UPDATER_PUBKEY_PLACEHOLDER`, so builds
-  say updates aren't set up and never check. The updater's files (`.sig` signatures and
+  whose public half is `plugins.updater.pubkey` in `tauri.conf.json` (the private half is the
+  owner's, kept out of the repository; [docs/release.md](docs/release.md)). The updater's files (`.sig` signatures and
   `latest.json`) are made only with the `src-tauri/tauri.updater.json` overlay and
   `TAURI_SIGNING_PRIVATE_KEY`, which the release workflow applies when it has the key;
   `pnpm tauri build` alone needs no key.
@@ -378,8 +377,7 @@ policy applied) can sign in and sync against `pnpm server:dev`.
   `https://*.googleusercontent.com` and `https://avatars.githubusercontent.com`; one that fails to
   load shows the initial instead), fonts, workers and media, and may connect only to Tauri's IPC
   and the production sync
-  server (`https://` and `wss://`; the placeholder `timer.example.com` until the final domain,
-  spec Q13). Tauri adds a hash of every script it serves. `tauri dev` does not apply the policy:
+  server (`https://timer.hanlin.uk` and `wss://timer.hanlin.uk`). Tauri adds a hash of every script it serves. `tauri dev` does not apply the policy:
   the webview loads Vite's page directly, and Tauri sets the header only on its own protocol's
   responses. To try it, build with `tauri.local-server.json` (above), start `pnpm server:dev` and
   run `src-tauri/target/debug/timer-app.exe`. The sync server's origin is written in the policy

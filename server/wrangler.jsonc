@@ -5,6 +5,10 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "timer-app",
   "main": "src/index.ts",
+  // The public address (docs/deploy.md › Choose the address). Cloudflare creates the DNS record and
+  // the certificate on deploy; the workers.dev address is off so the session cookie has one origin.
+  "routes": [{ "pattern": "timer.hanlin.uk", "custom_domain": true }],
+  "workers_dev": false,
   // The newest date the pinned workerd runtime supports; newer dates make wrangler fall back.
   "compatibility_date": "2026-10-12",
   "compatibility_flags": ["nodejs_compat"],

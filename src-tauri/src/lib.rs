@@ -429,7 +429,7 @@ mod tests {
         // The API's own origin, when the server names no page (`verificationUrlFor`).
         assert!(opens("http://localhost:8787/device?user_code=WDJBMJHT"));
         // Production, and the privacy policy and source links in Settings.
-        assert!(opens("https://timer.example.com/device?user_code=WDJBMJHT"));
+        assert!(opens("https://timer.hanlin.uk/device?user_code=WDJBMJHT"));
         assert!(opens(
             "https://github.com/hotdogee/timer-app/blob/main/docs/privacy.md"
         ));
@@ -454,10 +454,10 @@ mod tests {
         // spec Q13) and the project's GitHub pages.
         for url in [
             "https://example.com/",
-            "https://timer.example.com/",
-            "https://timer.example.com/api/export",
-            "https://timer.example.com.evil.example/device?user_code=WDJBMJHT",
-            "https://evil.example/?https://timer.example.com/device",
+            "https://timer.hanlin.uk/",
+            "https://timer.hanlin.uk/api/export",
+            "https://timer.hanlin.uk.evil.example/device?user_code=WDJBMJHT",
+            "https://evil.example/?https://timer.hanlin.uk/device",
             "https://github.com/hotdogee",
             "https://github.com/hotdogee/timer-app-fork",
             "https://gist.github.com/hotdogee/timer-app",

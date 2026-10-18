@@ -23,7 +23,7 @@
       "allow": [
         { "url": "http://localhost:5173/device*" },
         { "url": "http://localhost:8787/device*" },
-        { "url": "https://timer.example.com/device*" },
+        { "url": "https://timer.hanlin.uk/device*" },
         { "url": "https://github.com/hotdogee/timer-app" },
         { "url": "https://github.com/hotdogee/timer-app/**" }
       ]

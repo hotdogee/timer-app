@@ -81,11 +81,14 @@ mod tests {
     }
 
     #[test]
-    fn this_repository_config_has_no_updater_key_yet() {
+    fn this_repository_config_has_an_updater_key() {
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json"))
             .expect("tauri.conf.json is valid JSON");
         let updater = config.pointer("/plugins/updater");
         assert!(updater.is_some(), "tauri.conf.json configures the updater");
-        assert!(!is_configured(updater));
+        assert!(
+            is_configured(updater),
+            "plugins.updater.pubkey holds the release key (docs/release.md › Updater key)"
+        );
     }
 }

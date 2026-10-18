@@ -59,7 +59,7 @@ import { assetName } from './check-latest-json.mjs'
 export const PACKAGE_IDENTIFIER = 'Hotdogee.TimerApp'
 
 /** The manifests' schema version (also written in each template). */
-export const MANIFEST_VERSION = '1.28.0'
+export const MANIFEST_VERSION = '1.12.0'
 
 /** The winget templates, relative to the repository root. */
 export const WINGET_TEMPLATE_DIR = 'packaging/winget/Hotdogee.TimerApp'
