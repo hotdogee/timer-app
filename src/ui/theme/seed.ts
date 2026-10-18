@@ -31,12 +31,11 @@ export function isDefaultSeed(seed: string): boolean {
 const TIMED_OUT = Symbol('timed out')
 
 /**
- * Resolves the seed color from `accent`, waiting at most `timeoutMs`. Kept for the desktop shell
- * (M5), where the default seed follows the OS accent color (spec Q20); the web has no accent.
- * TODO(M5): call it from main.ts with `platform.accent` and pass the result to
- * `applyAppearance` as `defaultSeed`. A `null`, invalid or failed
- * accent gives {@link DEFAULT_SEED}. When the accent arrives after the timeout, the default is
- * returned and `onLate` later receives the accent (if valid), so the caller can re-theme.
+ * Resolves the seed color from `accent`, waiting at most `timeoutMs`: the desktop app's default
+ * seed follows the OS accent color (spec Q20; `followAccent` in `apply.ts` uses this at startup);
+ * the web has no accent. A `null`, invalid or failed accent gives {@link DEFAULT_SEED}. When the
+ * accent arrives after the timeout, the default is returned and `onLate` later receives the
+ * accent (if valid), so the caller can re-theme.
  */
 export async function resolveSeed(
   accent: () => Promise<string | null>,

@@ -4,7 +4,8 @@ import './app.css'
 import App from './App.svelte'
 import type { settings } from './core'
 import { applyLocaleSetting, m } from './i18n'
-import { registerPwa } from './pwa.svelte'
+import { platform } from './platform'
+import { registerPwa, startDesktopUpdateChecks } from './pwa.svelte'
 import { appClock } from './state/app-clock'
 import { APP_TARGET, replaceAppData, startAppData, type AppData } from './state/app-data.svelte'
 import { authStore } from './state/auth.svelte'
@@ -15,11 +16,28 @@ import { APP_STORAGE_NAMES, appStores, openDevicePersister } from './sync'
 import { DEVICE_VERIFICATION_PATH } from './sync/protocol'
 import { followAccount, onSessionDoubt } from './sync/remote.svelte'
 import Announcer from './ui/Announcer.svelte'
-import { applyAppearance } from './ui/theme/apply'
+import { MINI_PATH } from './ui/mini/mini'
+import { applyAppearance, followAccent } from './ui/theme/apply'
 
 const target = document.getElementById('app')
 if (!target) {
   throw new Error('Timer App: mount element #app is missing from index.html')
+}
+
+/**
+ * How long startup waits for the OS accent color (desktop, spec Q20) before painting with the
+ * default seed; an accent that answers later re-themes the page.
+ */
+const ACCENT_WAIT_MS = 200
+
+/**
+ * Starts following the OS accent color as the default seed (desktop only; the web has none), so
+ * the first theme already uses it. Resolves once it is known or {@link ACCENT_WAIT_MS} passed.
+ */
+function followOsAccent(): Promise<unknown> {
+  return platform.kind === 'tauri'
+    ? followAccent(platform.accent, ACCENT_WAIT_MS)
+    : Promise.resolve()
 }
 
 /** The built-in presets' names in the UI language, by preset id. */
@@ -51,8 +69,10 @@ function seedPresets(): readonly Preset[] {
  *    first run is seeded with its names in the UI language, and every card is settled, so a
  *    timer that ended while the app was closed is ringing.
  * 3. A custom seed's colors are in (the color library loads only for a seed other than the
- *    default), and the app mounts.
- * 4. The service worker registers (production web builds only).
+ *    default), and the app mounts. In the desktop app the default seed is the OS accent color,
+ *    asked for first thing (`followOsAccent`, waiting at most a moment) and followed live.
+ * 4. The service worker registers (production web builds only); the desktop app starts its update
+ *    checks instead (10 s after launch, then every 6 hours).
  *
  * Meanwhile the session check runs (`authStore.start()`, from the first step on; the app never
  * waits for it). Once the saved data is loaded, the sync-server connection and the server-time
@@ -64,10 +84,9 @@ function seedPresets(): readonly Preset[] {
  *
  * Startup never ends on a blank page: if loading the data fails in a way the data layer did not
  * handle, the app still mounts, in memory, with a console warning.
- *
- * The OS accent color as the default seed comes with the desktop shell (M5): the web has none.
  */
 async function start(root: HTMLElement): Promise<void> {
+  const accent = followOsAccent()
   authStore.start()
   const page = { appearance: null as Promise<void> | null }
   const applyDevice = (device: settings.DeviceSettings): void => {
@@ -104,8 +123,27 @@ async function start(root: HTMLElement): Promise<void> {
   syncOnAfterSignOut(() => authStore.status === 'signed-out')
   followAccount(() => (syncPreference.enabled ? (authStore.user?.id ?? null) : null))
   await page.appearance
+  // With the accent in (or given up on), the latest theme, which may be the accent's, is on.
+  await accent
+  await applyAppearance(settingsStore.device)
   mount(App, { target: root, props: { appData } })
   void registerPwa()
+  startDesktopUpdateChecks()
+}
+
+/**
+ * The desktop mini window's page (`/mini?card=<id>`, opened by the shell): one card in a window
+ * of its own (`ui/mini/page.ts`). Its code loads only on this path, while the OS accent color is
+ * asked for, so the card is themed like the main window from its first paint.
+ */
+async function startMini(root: HTMLElement): Promise<void> {
+  try {
+    const [, page] = await Promise.all([followOsAccent(), import('./ui/mini/page')])
+    await page.startMiniPage(root)
+  } catch (error) {
+    // Its code failed to load (a new build replaced this one meanwhile, say).
+    console.warn('Timer App: could not open the mini window page', error)
+  }
 }
 
 /**
@@ -131,4 +169,13 @@ async function startDevicePage(root: HTMLElement): Promise<void> {
   mount(Announcer, { target: root })
 }
 
-void (location.pathname === DEVICE_VERIFICATION_PATH ? startDevicePage(target) : start(target))
+switch (location.pathname) {
+  case DEVICE_VERIFICATION_PATH:
+    void startDevicePage(target)
+    break
+  case MINI_PATH:
+    void startMini(target)
+    break
+  default:
+    void start(target)
+}

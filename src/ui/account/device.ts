@@ -62,3 +62,23 @@ export function createDeviceApproval(client: DeviceClient): DeviceApprovalApi {
     },
   }
 }
+
+/**
+ * A code from the desktop sign-in as the app shows it: Better Auth's eight characters in two
+ * groups (`ABCD-EFGH`), easier to compare at a glance. Other codes are shown as they are. The
+ * approval page and the server ignore the dash.
+ */
+export function formatUserCode(code: string): string {
+  return /^[A-Z0-9]{8}$/i.test(code) ? `${code.slice(0, 4)}-${code.slice(4)}`.toUpperCase() : code
+}
+
+/**
+ * The code spelled out for screen readers, one character at a time (`A B C D, E F G H`), so it is
+ * not read as a word.
+ */
+export function spellUserCode(code: string): string {
+  return formatUserCode(code)
+    .split('-')
+    .map((group) => [...group].join(' '))
+    .join(', ')
+}

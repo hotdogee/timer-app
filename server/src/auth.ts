@@ -12,6 +12,7 @@ import { waitUntil } from 'cloudflare:workers'
 import { APPLE_ORIGIN, createAppleClientSecret } from './apple'
 import { authOptions } from './auth-options'
 import { originOf, setting, trustedOrigins, type OptionalSetting } from './config'
+import { DESKTOP_ORIGINS } from './cors'
 import { isWebSocketUpgrade } from './http'
 import { createMailer } from './mail'
 import { PROVIDERS, tokenFromSubprotocols, type Provider } from './protocol'
@@ -35,7 +36,9 @@ async function purgeUser(db: D1Database, user: { id: string; email: string }): P
 
 /**
  * Better Auth for `env`. `origins` are the origins trusted with cookies (`BETTER_AUTH_URL`'s and
- * `TRUSTED_ORIGINS`); Apple's is added for its form_post callback when Apple is configured.
+ * `TRUSTED_ORIGINS`). Better Auth also trusts the desktop app's origins, whose sign-in requests
+ * (an emailed code, the device flow) carry their `Origin` but no cookies, and Apple's for its
+ * form_post callback when Apple is configured.
  */
 function buildAuth(env: Env, socialProviders: SocialProviders, origins: readonly string[]) {
   const mailer = createMailer(env)
@@ -43,8 +46,12 @@ function buildAuth(env: Env, socialProviders: SocialProviders, origins: readonly
     ...authOptions({
       baseURL: env.BETTER_AUTH_URL,
       secret: env.BETTER_AUTH_SECRET,
-      // Apple posts the OAuth result back to the callback (form_post) from its own origin.
-      trustedOrigins: socialProviders.apple ? [...origins, APPLE_ORIGIN] : [...origins],
+      trustedOrigins: [
+        ...origins,
+        ...DESKTOP_ORIGINS,
+        // Apple posts the OAuth result back to the callback (form_post) from its own origin.
+        ...(socialProviders.apple ? [APPLE_ORIGIN] : []),
+      ],
       socialProviders,
       sendCode: (email, otp) => mailer.sendCode(email, otp),
       allowCodeEmail: createCodeEmailGate(env),

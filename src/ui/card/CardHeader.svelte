@@ -1,9 +1,10 @@
 <!--
   @component
   A card's header: type icon and name on the left; mute, fullscreen and the mini-window button on
-  the right (the mini window stays hidden until the desktop milestone). In edit mode the name
-  becomes a text field (Enter or leaving the field saves, Esc reverts) and a drag handle and a
-  delete button appear; the delete goes through `ondelete` (the app may ask first). `renaming`
+  the right (only where there is a mini window: the desktop app, or a browser with Document
+  Picture-in-Picture; it opens the card there, or switches the open one to it). In edit mode the
+  name becomes a text field (Enter or leaving the field saves, Esc reverts) and a drag handle and
+  a delete button appear; the delete goes through `ondelete` (the app may ask first). `renaming`
   shows the field outside edit mode too (F2) and focuses it. The type icon is decorative: the
   card's description says its kind.
 -->
@@ -12,7 +13,9 @@
 
   import type { cards } from '../../core'
   import { m } from '../../i18n'
+  import { platform } from '../../platform'
   import { cardStore } from '../../state/cards.svelte'
+  import { openMiniWindow } from '../mini/open'
   import { Icon, IconButton } from '../primitives'
 
   interface Props {
@@ -175,13 +178,16 @@
       label={fullscreen ? m.card_exit_fullscreen() : m.card_fullscreen()}
       onclick={ontogglefullscreen}
     />
-    <!-- Always-on-top mini window: desktop milestone (M5). -->
-    <IconButton
-      icon="picture_in_picture_alt"
-      label={m.card_mini_window()}
-      hidden
-      data-feature="mini-window"
-    />
+    {#if platform.windows.supported}
+      <IconButton
+        icon="picture_in_picture_alt"
+        label={m.card_mini_window()}
+        data-feature="mini-window"
+        onclick={() => {
+          void openMiniWindow(card.id)
+        }}
+      />
+    {/if}
   </div>
 </header>
 

@@ -5,14 +5,21 @@ import type { SoundId as PlatformSoundId } from '../platform/sound-patterns'
 import { ACTION_IDS, DEFAULT_BINDINGS, resolveAction, type KeyEventLike } from './keymap'
 import {
   bindingsWith,
+  CLOSE_BEHAVIORS,
   DENSITIES,
+  DESKTOP_DEFAULTS,
   DEVICE_DEFAULTS,
   FONT_IDS,
+  HOTKEY_IDS,
   HOUR_CYCLES,
   isLocale,
   LOCALES,
+  MAX_AUTH_TOKEN_LENGTH,
+  migrateDesktopSettings,
+  migrateDeviceAuth,
   migrateDeviceSettings,
   migrateSyncedSettings,
+  updateDesktopSettings,
   runMigrations,
   SETTING_RANGES,
   SETTINGS_SCHEMA_VERSION,
@@ -20,6 +27,7 @@ import {
   SYNCED_DEFAULTS,
   THEME_MODES,
   TIME_STYLES,
+  type DesktopSettings,
   type DeviceSettings,
   type KeymapOverrides,
   type SyncedSettings,
@@ -592,5 +600,131 @@ describe('bindingsWith', () => {
     expect(resolveAction(bindings, ev('T', { shiftKey: true }), 'other')).toBe('newTimer')
     expect(resolveAction(bindings, ev('n'), 'other')).toBeNull()
     expect(resolveAction(bindings, ev('k', { ctrlKey: true }), 'other')).toBeNull()
+  })
+})
+
+describe('desktop settings', () => {
+  it('default to no autostart, Q11 close behavior, a pinned mini window and no hotkeys', () => {
+    expect(DESKTOP_DEFAULTS).toEqual({
+      launchAtLogin: false,
+      closeBehavior: 'tray-while-running',
+      miniAlwaysOnTop: true,
+      hotkeys: { toggleLast: null, showApp: null },
+    })
+    expect(Object.isFrozen(DESKTOP_DEFAULTS)).toBe(true)
+    expect(Object.isFrozen(DESKTOP_DEFAULTS.hotkeys)).toBe(true)
+    expect(CLOSE_BEHAVIORS).toEqual(['tray-while-running', 'tray', 'quit'])
+    expect(HOTKEY_IDS).toEqual(['toggleLast', 'showApp'])
+  })
+
+  it('read data from before the desktop group existed as the defaults', () => {
+    expect(migrateDesktopSettings(undefined)).toEqual(DESKTOP_DEFAULTS)
+    expect(migrateDesktopSettings({})).toEqual(DESKTOP_DEFAULTS)
+    expect(migrateDesktopSettings({ themeMode: 'dark' }, 1)).toEqual(DESKTOP_DEFAULTS)
+    for (const junk of JUNK) expect(migrateDesktopSettings(junk)).toEqual(DESKTOP_DEFAULTS)
+  })
+
+  it('keep valid values, every close behavior and portable hotkey combos as written', () => {
+    for (const closeBehavior of CLOSE_BEHAVIORS) {
+      const input: DesktopSettings = {
+        launchAtLogin: true,
+        closeBehavior,
+        miniAlwaysOnTop: false,
+        hotkeys: { toggleLast: 'Mod+Shift+Space', showApp: 'Ctrl+Alt+T' },
+      }
+      expect(migrateDesktopSettings(input)).toEqual(input)
+    }
+    expect(migrateDesktopSettings({ hotkeys: { toggleLast: 'F13' } }).hotkeys).toEqual({
+      toggleLast: 'F13',
+      showApp: null,
+    })
+  })
+
+  it('fall back field by field, dropping unknown fields', () => {
+    const out = migrateDesktopSettings({
+      launchAtLogin: 'yes',
+      closeBehavior: 'minimize',
+      miniAlwaysOnTop: false,
+      hotkeys: { toggleLast: 'Mod+K', extra: 'Mod+J' },
+      seed: '#ff0000',
+    })
+    expect(out).toEqual({
+      ...DESKTOP_DEFAULTS,
+      miniAlwaysOnTop: false,
+      hotkeys: { toggleLast: 'Mod+K', showApp: null },
+    })
+    expect(out).not.toHaveProperty('seed')
+    expect(out.hotkeys).not.toHaveProperty('extra')
+  })
+
+  it('read a hotkey that is blank, too long, malformed or not text as unbound', () => {
+    for (const combo of ['', '   ', 'Mod+', 'Hyper+K', 'Shift', `Mod+${'K'.repeat(70)}`, 7, {}]) {
+      expect(migrateDesktopSettings({ hotkeys: { showApp: combo } }).hotkeys.showApp).toBeNull()
+    }
+    for (const junk of JUNK) {
+      expect(migrateDesktopSettings({ hotkeys: junk }).hotkeys).toEqual(DESKTOP_DEFAULTS.hotkeys)
+    }
+  })
+
+  it('come back frozen, hotkeys too', () => {
+    const out = migrateDesktopSettings({ hotkeys: { toggleLast: 'Mod+Shift+Space' } })
+    expect(Object.isFrozen(out)).toBe(true)
+    expect(Object.isFrozen(out.hotkeys)).toBe(true)
+  })
+
+  it('update top-level fields and only the hotkeys named', () => {
+    const current = migrateDesktopSettings({
+      hotkeys: { toggleLast: 'Mod+Shift+Space', showApp: 'Mod+Shift+T' },
+    })
+    expect(updateDesktopSettings(current, { closeBehavior: 'quit' })).toEqual({
+      ...current,
+      closeBehavior: 'quit',
+    })
+    expect(updateDesktopSettings(current, { hotkeys: { showApp: null } }).hotkeys).toEqual({
+      toggleLast: 'Mod+Shift+Space',
+      showApp: null,
+    })
+    expect(
+      updateDesktopSettings(current, { hotkeys: { toggleLast: 'nonsense+' } }).hotkeys,
+    ).toEqual({ toggleLast: null, showApp: 'Mod+Shift+T' })
+    expect(updateDesktopSettings(current, {})).toEqual(current)
+  })
+})
+
+describe('the desktop bearer token', () => {
+  const EXPIRES = Date.UTC(2026, 10, 17)
+
+  it('keeps a valid token and its expiry, and nothing else', () => {
+    const out = migrateDeviceAuth({ token: 'abc.DEF/+=_-~', expiresAt: EXPIRES, user: 'x' })
+    expect(out).toEqual({ token: 'abc.DEF/+=_-~', expiresAt: EXPIRES })
+    expect(Object.isFrozen(out)).toBe(true)
+  })
+
+  it('is null when either field is missing or invalid', () => {
+    const invalid: unknown[] = [
+      undefined,
+      null,
+      {},
+      { token: 'abc' },
+      { expiresAt: EXPIRES },
+      { token: '', expiresAt: EXPIRES },
+      { token: 'has space', expiresAt: EXPIRES },
+      { token: 'line\nbreak', expiresAt: EXPIRES },
+      { token: 'ünïcode', expiresAt: EXPIRES },
+      { token: 'x'.repeat(MAX_AUTH_TOKEN_LENGTH + 1), expiresAt: EXPIRES },
+      { token: 42, expiresAt: EXPIRES },
+      { token: 'abc', expiresAt: 0 },
+      { token: 'abc', expiresAt: -1 },
+      { token: 'abc', expiresAt: NaN },
+      { token: 'abc', expiresAt: Infinity },
+      { token: 'abc', expiresAt: '2026-11-17' },
+      ...JUNK,
+    ]
+    for (const input of invalid) expect(migrateDeviceAuth(input)).toBeNull()
+  })
+
+  it('accepts the longest token allowed', () => {
+    const token = 'x'.repeat(MAX_AUTH_TOKEN_LENGTH)
+    expect(migrateDeviceAuth({ token, expiresAt: 1 })?.token).toBe(token)
   })
 })

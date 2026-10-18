@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { settings } from '../../core'
-import { FONT_STACKS, applyAppearance, pageColors, themeSeed, type SchemeModule } from './apply'
+import {
+  FONT_STACKS,
+  applyAppearance,
+  applyDefaultSeed,
+  followAccent,
+  pageColors,
+  themeSeed,
+  type SchemeModule,
+} from './apply'
+import { defaultSeedState } from './default-seed.svelte'
 import tokensCss from './tokens.css?raw'
 import { DEFAULT_THEME_CSS } from './default-theme'
 import { themeCss } from './scheme'
@@ -234,6 +243,153 @@ describe('applyAppearance', () => {
     expect(document.documentElement.dataset.density).toBe('compact')
     void applyAppearance(device())
     expect(document.documentElement.dataset.density).toBe('comfortable')
+  })
+})
+
+describe('applyDefaultSeed', () => {
+  const TEAL = '#00897b'
+
+  it('re-themes a page that follows the accent, and keeps the accent for later calls', async () => {
+    const doc = page()
+    await applyAppearance(device(), doc)
+    expect(themeText(doc)).toBe(DEFAULT_THEME_CSS)
+    await applyDefaultSeed(PURPLE, doc)
+    expect(themeText(doc)).toBe(themeCss(PURPLE))
+    // The app's effect applies the settings again without a defaultSeed: the accent stays.
+    await applyAppearance(device({ density: 'compact' }), doc)
+    expect(themeText(doc)).toBe(themeCss(PURPLE))
+    await applyDefaultSeed(null, doc)
+    expect(themeText(doc)).toBe(DEFAULT_THEME_CSS)
+  })
+
+  it('leaves a page with a seed of its own alone until it follows the accent again', async () => {
+    const doc = page()
+    await applyAppearance(device({ seed: TEAL }), doc)
+    await applyDefaultSeed(PURPLE, doc)
+    expect(themeText(doc)).toBe(themeCss(TEAL))
+    await applyAppearance(device(), doc)
+    expect(themeText(doc)).toBe(themeCss(PURPLE))
+  })
+
+  it('only remembers the accent before the page is first themed', async () => {
+    const doc = page()
+    await applyDefaultSeed(PURPLE, doc)
+    expect(themeText(doc)).toBeNull()
+    await applyAppearance(device(), doc)
+    expect(themeText(doc)).toBe(themeCss(PURPLE))
+  })
+
+  it('lets an explicit defaultSeed replace the remembered accent', async () => {
+    const doc = page()
+    await applyDefaultSeed(PURPLE, doc)
+    await applyAppearance(device(), doc, { defaultSeed: null })
+    expect(themeText(doc)).toBe(DEFAULT_THEME_CSS)
+  })
+
+  it('tells Settings which accent the page itself uses, not another document', async () => {
+    await applyDefaultSeed('#8E24AA')
+    expect(defaultSeedState.current).toBe(PURPLE)
+    // Another document (the Picture-in-Picture window, a test page) is not the app's.
+    await applyDefaultSeed(TEAL, page())
+    expect(defaultSeedState.current).toBe(PURPLE)
+    // Google blue is the default anyway: no accent to name.
+    await applyDefaultSeed('#0B57D0')
+    expect(defaultSeedState.current).toBeNull()
+    await applyDefaultSeed(TEAL)
+    await applyAppearance(device(), document, { defaultSeed: null })
+    expect(defaultSeedState.current).toBeNull()
+  })
+})
+
+describe('followAccent', () => {
+  /** An accent source whose answer and changes the test controls. */
+  function accentSource(answer: Promise<string | null>) {
+    const listeners = new Set<(accent: string) => void>()
+    return {
+      get: vi.fn(() => answer),
+      onChange(listener: (accent: string) => void) {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      },
+      change(accent: string) {
+        for (const listener of listeners) listener(accent)
+      },
+      get listening() {
+        return listeners.size
+      },
+    }
+  }
+
+  it('themes with the accent that arrives in time, and with every later change', async () => {
+    const doc = page()
+    const source = accentSource(Promise.resolve('#8E24AA'))
+    void applyAppearance(device(), doc)
+    const stop = await followAccent(source, 100, doc)
+    await applyAppearance(device(), doc)
+    expect(themeText(doc)).toBe(themeCss(PURPLE))
+    source.change('#00897b')
+    await applyAppearance(device(), doc)
+    expect(themeText(doc)).toBe(themeCss('#00897b'))
+    stop()
+    expect(source.listening).toBe(0)
+  })
+
+  it('does not hold startup for a slow accent, and themes when it arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      const doc = page()
+      let answer: (accent: string | null) => void = () => undefined
+      const source = accentSource(
+        new Promise((resolve) => {
+          answer = resolve
+        }),
+      )
+      const following = followAccent(source, 100, doc)
+      await vi.advanceTimersByTimeAsync(100)
+      await following
+      await applyAppearance(device(), doc)
+      expect(themeText(doc)).toBe(DEFAULT_THEME_CSS)
+      answer(PURPLE)
+      await vi.advanceTimersByTimeAsync(0)
+      await applyAppearance(device(), doc)
+      expect(themeText(doc)).toBe(themeCss(PURPLE))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a change that came before the first answer', async () => {
+    vi.useFakeTimers()
+    try {
+      const doc = page()
+      void applyAppearance(device(), doc)
+      let answer: (accent: string | null) => void = () => undefined
+      const source = accentSource(
+        new Promise((resolve) => {
+          answer = resolve
+        }),
+      )
+      void followAccent(source, 100, doc)
+      source.change('#00897b')
+      answer(PURPLE)
+      await vi.advanceTimersByTimeAsync(200)
+      await applyAppearance(device(), doc)
+      expect(themeText(doc)).toBe(themeCss('#00897b'))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('works with a source that has no change events, as on the web', async () => {
+    const doc = page()
+    void applyAppearance(device(), doc)
+    const stop = await followAccent({ get: () => Promise.resolve(null) }, 100, doc)
+    await applyAppearance(device(), doc)
+    expect(themeText(doc)).toBe(DEFAULT_THEME_CSS)
+    expect(stop).toBeTypeOf('function')
+    stop()
   })
 })
 

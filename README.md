@@ -25,7 +25,7 @@ pnpm tauri dev   # desktop app (starts the web dev server for you)
 ```
 
 `pnpm dev` alone runs the whole app signed out. Signing in and sync need the sync server as well;
-see [Sync server](#sync-server).
+see [Sync server](#sync-server). The desktop app is described in [Desktop](#desktop).
 
 ## Scripts
 
@@ -45,6 +45,7 @@ see [Sync server](#sync-server).
 | `pnpm i18n:compile`   | Compile `messages/*.json` into `src/paraglide/` (generated, not committed)                        |
 | `pnpm icons`          | Regenerate the PWA icons and `favicon.ico` in `public/` from `public/icon.svg`                    |
 | `pnpm tauri <cmd>`    | Tauri CLI, e.g. `pnpm tauri dev`, `pnpm tauri build`                                              |
+| `pnpm smoke:desktop`  | Windows: drive the real desktop app through `tauri dev` and report (see [Desktop](#desktop))      |
 | `pnpm server:dev`     | The sync server: `wrangler dev` at `http://127.0.0.1:8787`                                        |
 | `pnpm server:migrate` | Apply `server/migrations/` to the local D1 (`server:migrate:remote` for production)               |
 | `pnpm server:types`   | Regenerate `server/worker-configuration.d.ts` after changing `server/wrangler.jsonc`              |
@@ -72,7 +73,10 @@ saved under `test-results/` for review; they are not compared pixel by pixel.
 
 CI (`.github/workflows/ci.yml`) runs `check`, `lint`, `test`, `test:server`, `build` and the
 end-to-end tests (against the production build) on every push to `main` and on pull requests, and
-keeps `test-results/` (traces of failures and the screenshots) as a build artifact. Deploying is a
+keeps `test-results/` (traces of failures and the screenshots) as a build artifact. A second job
+checks the desktop shell on Windows: in `src-tauri`, `cargo fmt --check`, `cargo clippy` for the
+debug and the release profile, `cargo test` and `cargo audit` (advisories accepted for now, each
+with its reason, are in `src-tauri/.cargo/audit.toml`). Deploying is a
 separate, manual workflow (`.github/workflows/deploy.yml`; see [docs/deploy.md](docs/deploy.md)).
 
 ## Layout
@@ -83,15 +87,16 @@ src/
                   formatting, frame ticker, card list model, keymap, settings schema and
                   migrations, export file format. No DOM, no Svelte, no Tauri.
   platform/       Browser and OS services behind small interfaces (notifications, alarm audio,
-                  background wake-up worker, fullscreen, ids, accent color); web implementations
-                  now, Tauri pieces later
+                  background wake-up worker, fullscreen, ids, accent color, mini window, global
+                  hotkeys, launch at login, updater, tray and close behavior, opener): web
+                  implementations, and in tauri/ the desktop ones, loaded only in the desktop app
   sync/           TinyBase stores and their schemas, persistence (IndexedDB, localStorage), tab
                   sync over BroadcastChannel, the bridge between the card store and the store; the
                   sync-server connection, the server-time offset, the API's address and the
                   client's copy of the server protocol (protocol.ts)
   state/          Reactive app state (.svelte.ts): card store, settings, presets, app data startup,
-                  alarm, keyboard controller, auth state, the app clock (device clock plus the
-                  server-time offset)
+                  alarm, keyboard controller, auth state (with the desktop's device sign-in), the
+                  app clock (device clock plus the server-time offset), the desktop wiring
   i18n/           The active locale and reactive messages (`m`); compiled messages in src/paraglide/
   ui/
     theme/        Material 3 color scheme from a seed color, design tokens, fonts, appearance
@@ -102,19 +107,27 @@ src/
     palette/      Command palette and the shortcut cheat sheet's data
     settings/     The settings dialog: appearance, behavior, keyboard, presets, data, account,
                   about
-    account/      Sign-in form, sync status button, delete-account dialog, the /device page
+    account/      Sign-in form, the desktop's device sign-in, sync status button, delete-account
+                  dialog, the /device page
+    mini/         The mini window: one compact card, its /mini page (desktop) and its
+                  Picture-in-Picture rendering (web)
   App.svelte      Wires the grid, keyboard layer, palette, cheat sheet, settings, alarm, snackbars,
-                  sync status
-  main.ts         Web entry point: starts the session check, loads the data, applies the
-                  appearance and the language, starts sync while signed in, mounts the app, then
-                  registers the service worker; on /device it shows the device approval page alone
-  pwa.svelte.ts   Service worker registration and the "Update ready" state
+                  sync status, and in the desktop app the shell, the tray and the global hotkeys
+  main.ts         Entry point: starts the session check, loads the data, applies the appearance
+                  (in the desktop app with the OS accent color) and the language, starts sync while
+                  signed in, mounts the app, then registers the service worker (desktop: starts the
+                  update checks); on /device it shows the device approval page alone, on /mini the
+                  desktop's mini window page
+  pwa.svelte.ts   Service worker registration and the "Update ready" state; the desktop updater's
+                  state
 messages/         Translations: en.json, zh-TW.json, ja.json
 project.inlang/   Paraglide (inlang) project settings
 public/           PWA icons and the favicon (generated from icon.svg by `pnpm icons`)
 e2e/              Playwright end-to-end tests
 server/           The sync server: Cloudflare Worker, Better Auth on D1, a Durable Object per user
-src-tauri/        Tauri 2 desktop shell (Rust)
+src-tauri/        Tauri 2 desktop shell (Rust): plugins, tray, close behavior, mini window, accent
+                  color, the smoke hook; capabilities/ says what each window may call
+scripts/          The desktop smoke test (smoke-desktop.mjs)
 docs/             Product spec, tech stack, deployment guide, privacy policy draft
 ```
 
@@ -186,8 +199,12 @@ buttons are hidden).
 - **Signing out** stops sync and keeps the cards on the device. **Delete account** (it asks for
   `DELETE` typed) deletes the account, its sessions and the server's copy, and keeps the cards on
   the device. **Download server copy** saves what the server holds as JSON.
-- **Desktop sign-in** (M5): the desktop app shows a code and opens `/device`, where a signed-in
-  visitor approves or denies it.
+- **Desktop sign-in**: Google refuses OAuth inside an app's webview, so the desktop app signs in
+  with device authorization: Settings › Account shows a code and opens the `/device` page in the
+  system browser, where a signed-in visitor approves or denies it; the app then receives a bearer
+  token, keeps it in its device store (never synced, never exported) and sends it with every API
+  request and as the sync socket's subprotocol. The emailed code works on desktop too; the
+  provider buttons are hidden there. See [Desktop](#desktop).
 
 ## Sync server
 
@@ -222,6 +239,127 @@ pnpm dev                                       # the app at http://localhost:517
   Better Auth CLI, package `auth`) and add a migration; see server/README.md.
 - `compatibility_date` in `wrangler.jsonc` is pinned to the newest date the installed workerd
   runtime supports; move it with wrangler upgrades.
+
+## Desktop
+
+The desktop app is the same web app in a Tauri 2 shell (`src-tauri/`). Everything desktop-only sits
+behind `src/platform` and shows in the UI only where the platform supports it. A build the Tauri
+CLI runs is a desktop build (`__DESKTOP__` in the code, from `TAURI_ENV_PLATFORM`); a web build
+leaves the desktop-only code out entirely (the Tauri services in `src/platform/tauri/`, the shell
+wiring, the update prompt, the device sign-in's requests), and `pnpm build` fails if any of it, or
+any `@tauri-apps/*` module, lands in a chunk the page loads at startup. In the desktop app the
+Tauri services load lazily on first use.
+
+```sh
+pnpm tauri dev                          # debug build, with Vite on 5173 (hot reload)
+pnpm tauri dev -- -- --minimized        # start hidden in the tray, as launch at login does
+TIMER_SERVER_ORIGIN=https://timer.example.com pnpm tauri dev   # another sync server
+TIMER_SERVER_ORIGIN=https://timer.example.com pnpm tauri build # a release build needs https (M6)
+```
+
+- **Tray and closing**: the app lives in the tray (the Windows notification area, the macOS menu
+  bar; Linux shows the menu but has no click events): a click shows the window, and the menu has
+  Show, "Start or pause the last card" and Quit, in the app's language. Closing the window hides
+  it to the tray while a card (timer or stopwatch) runs or rings, so alarms still sound (spec
+  Q11), or while the mini window is open, so a floating card stays; otherwise it quits. Settings ›
+  Desktop can make it always hide or always quit (then the mini window closes with it). Quitting
+  closes the mini window too. One instance runs: starting the app again brings the first one's
+  window back.
+- **Mini window**: `T`, the card header's button or the palette open the card in a small
+  frameless window that floats above other apps (the `/mini?card=<id>` page, with its own copy of
+  the stores, kept in step with the main window like a browser tab). Its pin turns floating off;
+  its position is remembered; its title (for Alt+Tab and screen readers) names the card. Its
+  buttons are mouse-sized (at least 32 px, not the cards' 44 px), to fit a 240×150 window. On the
+  web the same card opens in a Document Picture-in-Picture window (Chrome and Edge); elsewhere the
+  button is hidden. The `/mini` page in a plain browser tab (as the end-to-end tests open it) has
+  no pin.
+- **Global hotkeys** (Settings › Desktop, none at first): "Start or pause the last card" acts on
+  the card last started, resumed or paused (else the selected one) without bringing the app
+  forward; "Show or hide Timer App" toggles the window. They need Ctrl, Alt or Meta and are saved
+  only once the OS has registered them; a combo another app holds shows "Another app uses …". One
+  another app took before Timer App started shows that as soon as Settings › Desktop opens, which
+  tries it again then. Settings › Keyboard points there.
+- **Launch at login** (off at first) starts the app with `--minimized`: Windows writes
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (the shell quotes the program's path,
+  which the autostart plugin leaves bare, and repairs an unquoted entry at every start), macOS a
+  LaunchAgent in `~/Library/LaunchAgents`, Linux a `.desktop` file in `~/.config/autostart`. A
+  change the OS refuses springs back, with a note that is also announced.
+- **Accent color**: while Settings › Appearance › seed follows the OS (the default), the theme
+  uses the system accent color (Windows, also live when it changes; macOS and GNOME at start), and
+  the Color picker shows it and says so ("Use the system accent" goes back to it).
+- **Notifications** are system notifications; on Windows a click brings the app back while the
+  toast is on screen, elsewhere it may not reach the app (the tray does).
+- **Sign-in** goes to `VITE_API_ORIGIN`, which a build under the Tauri CLI takes from
+  `TIMER_SERVER_ORIGIN` (default `http://localhost:8787`, the local `wrangler dev`; M6 sets the
+  production origin). A release build (`tauri build` without `--debug`) refuses an origin that is
+  not `https://` (`TIMER_ALLOW_INSECURE_ORIGIN=1` allows one for a local test build). The server
+  answers the desktop origins with CORS (`tauri.localhost`, plus `BETTER_AUTH_URL` and
+  `TRUSTED_ORIGINS`; under `tauri dev` the webview's origin is Vite's `http://localhost:5173`, the
+  default `BETTER_AUTH_URL`). "Open the browser" opens the server's approval page, on its
+  `BETTER_AUTH_URL` origin; the panel also shows that page's address, and says so when the browser
+  did not open. Signing out while the server is out of reach still signs out on this device (the
+  token is dropped; the server's session ends when it expires). The bearer token is kept in the
+  webview's storage like the other device settings, unencrypted, so any program running as the
+  user can read it (an accepted risk until M6 moves it to the OS credential store).
+- **Updates**: the updater checks 10 s after launch and every 6 hours and offers "Update …
+  available" with Install and restart; Settings › About has a Check for updates row. Until M6
+  adds the signing key, `tauri.conf.json` carries `UPDATER_PUBKEY_PLACEHOLDER`, so this build says
+  updates aren't set up and never checks. `bundle.createUpdaterArtifacts` is on, so
+  `pnpm tauri build` needs `TAURI_SIGNING_PRIVATE_KEY` (M6). The content security policy is still
+  `null` (M6).
+- **Permissions**: `src-tauri/capabilities/default.json` (the `main` window) and `mini.json` (the
+  mini window) list what each window's page may call, the app's own commands included (`build.rs`
+  declares them as permissions, `allow-<command>`, so a command no capability grants is refused).
+  The mini window may only listen to events, drag itself, read the accent color and close and pin
+  itself. The browser opener may open `https://` pages and, over plain HTTP, only the local
+  `/device` pages (`http://localhost:5173/device*`, `http://localhost:8787/device*`; M6 narrows
+  `https://**` to the production origin and GitHub). The debug-only `smoke_mark` command and its
+  grant (`capabilities/debug/`, which `build.rs` reads only for debug builds) are not in release
+  builds.
+
+Where a desktop install keeps its data (the bundle identifier is `com.timerapp.dev` until the
+final name, spec Q13):
+
+| What                                   | Windows                                     | macOS                                            | Linux                             |
+| -------------------------------------- | ------------------------------------------- | ------------------------------------------------ | --------------------------------- |
+| Cards, settings, sign-in (web storage) | `%LOCALAPPDATA%\com.timerapp.dev\EBWebView` | WebKit's store for the app (`~/Library/WebKit`)  | `~/.local/share/com.timerapp.dev` |
+| Window places (`.window-state.json`)   | `%APPDATA%\com.timerapp.dev`                | `~/Library/Application Support/com.timerapp.dev` | `~/.config/com.timerapp.dev`      |
+
+### Desktop smoke test
+
+`pnpm smoke:desktop` (Windows) runs the real app and checks what the unit and end-to-end tests
+cannot reach. It starts `tauri dev` itself, drives the webview over the Chrome DevTools Protocol
+(WebView2 with `--remote-debugging-port`) and the windows and keys through Win32 from PowerShell,
+and reads timings from the `[smoke]` lines the debug build prints (`smoke_mark`). It checks that:
+
+1. the main window opens, the tray menu follows the language, and the OS accent color seeds the
+   theme;
+2. a 60 s timer started from the keyboard rings within 1 s of its end while the window is hidden
+   to the tray, the notification call succeeds, the alarm sound plays, and the tray icon brings
+   the window back;
+3. the mini window opens on top, Space there starts and pauses the card while the main grid
+   follows, and Esc closes it;
+4. a global hotkey recorded in Settings › Desktop starts and pauses the last-used card while
+   another window has the focus, which keeps it;
+5. desktop sign-in works against `wrangler dev` (started as the end-to-end tests start it): the
+   approval page's URL is one the opener's scope allows (checked against the capability, not
+   clicked, which would open your browser) and its address shows, a signed-in user approves the
+   code, the token is stored, the sync socket connects, a card made on the desktop reaches the
+   server, and Sign out clears the token;
+6. closing with nothing running quits and saves the window's place; started again with
+   `--minimized`, the app stays hidden in the tray, an alarm in the never-shown window still
+   sounds, and a second instance exits and brings the window back where it was.
+
+It writes `report.md`, `report.json`, screenshots and logs to `test-results/smoke-desktop`
+(`--out <dir>` for another folder, which it empties first, so it refuses one that is or holds the
+repository, or one outside `test-results/` that is neither empty nor an earlier run's output;
+`--skip-sign-in` leaves out the sync server). It needs ports
+5173, 8787 and 9333 free (`--cdp-port` picks another for the DevTools) and no Timer App running.
+It uses a fresh WebView2 data folder inside the output folder, so your own cards and settings are
+untouched, and puts the window-state file back afterwards. Every process it starts is killed with
+its tree at the end, also on failure or Ctrl+C. The first run builds the debug app (minutes); later runs
+take about five minutes, most of it the 60 s timer. Leave the keyboard and mouse alone while it
+runs: it moves windows and presses keys.
 
 ## Translations
 

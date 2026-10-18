@@ -1,18 +1,20 @@
 /**
  * The settings dialog's sections (spec › Settings) in display order, their titles and icons, and
- * keyboard movement in the section tab list. Desktop comes with the desktop milestone.
+ * keyboard movement in the section tab list. Desktop exists only in the desktop app.
  */
 import { m } from '../../i18n'
+import type { PlatformKind } from '../../platform'
 import type { GlyphName } from './icons'
 
 export type SectionId =
-  'appearance' | 'behavior' | 'keyboard' | 'presets' | 'data' | 'account' | 'about'
+  'appearance' | 'behavior' | 'keyboard' | 'desktop' | 'presets' | 'data' | 'account' | 'about'
 
 /** Every section, in the order the dialog lists them. Frozen. */
 export const SECTION_IDS: readonly SectionId[] = Object.freeze([
   'appearance',
   'behavior',
   'keyboard',
+  'desktop',
   'presets',
   'data',
   'account',
@@ -23,6 +25,7 @@ const TITLES: Readonly<Record<SectionId, () => string>> = {
   appearance: m.settings_section_appearance,
   behavior: m.settings_section_behavior,
   keyboard: m.settings_section_keyboard,
+  desktop: m.settings_section_desktop,
   presets: m.settings_section_presets,
   data: m.settings_section_data,
   account: m.settings_section_account,
@@ -34,11 +37,24 @@ export const SECTION_ICONS: Readonly<Record<SectionId, GlyphName>> = Object.free
   appearance: 'palette',
   behavior: 'tune',
   keyboard: 'keyboard',
+  desktop: 'desktop_windows',
   presets: 'bookmarks',
   data: 'database',
   account: 'account_circle',
   about: 'info',
 })
+
+/** The sections that only the desktop app has. */
+const DESKTOP_ONLY: ReadonlySet<SectionId> = new Set(['desktop'])
+
+const WEB_SECTION_IDS: readonly SectionId[] = Object.freeze(
+  SECTION_IDS.filter((id) => !DESKTOP_ONLY.has(id)),
+)
+
+/** The sections the dialog lists in shell `kind`: all on desktop, all but Desktop on the web. */
+export function sectionsFor(kind: PlatformKind): readonly SectionId[] {
+  return kind === 'tauri' ? SECTION_IDS : WEB_SECTION_IDS
+}
 
 /** The id of a section's tab in the dialog whose ids start with `prefix`. */
 export function tabId(prefix: string, section: SectionId): string {

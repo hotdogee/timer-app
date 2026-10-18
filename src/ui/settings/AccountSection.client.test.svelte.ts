@@ -490,6 +490,20 @@ describe('signed in', () => {
     expect(document.activeElement).toBe(labelled(target, 'Email'))
   })
 
+  it('says when the desktop app signed out here only, the server out of reach', async () => {
+    const { target, signOut, state } = await setup(SIGNED_IN)
+    signOut.mockImplementationOnce(() => {
+      state.user = null
+      state.status = 'signed-out'
+      return Promise.resolve('device-only' as const)
+    })
+    button(target, 'Sign out').click()
+    await settle()
+    expect(currentAnnouncement()).toBe(
+      "Signed out on this device. The server couldn't be reached, so the session there ends when it expires.",
+    )
+  })
+
   it('says why signing out failed and stays signed in', async () => {
     const { target, next } = await setup(SIGNED_IN)
     next.error = 'network'

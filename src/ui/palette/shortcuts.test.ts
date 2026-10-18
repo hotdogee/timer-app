@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { keymap } from '../../core'
 import { setAppLocale } from '../../i18n'
-import { comboLabels, HELP_SECTIONS, helpSections, shortcutLabel } from './shortcuts'
+import {
+  comboLabels,
+  HELP_SECTIONS,
+  helpSectionSpecs,
+  helpSections,
+  shortcutLabel,
+} from './shortcuts'
 
 const DEFAULTS = keymap.DEFAULT_BINDINGS
 
@@ -49,6 +55,22 @@ describe('HELP_SECTIONS', () => {
     const listed = new Set(HELP_SECTIONS.flatMap((s) => s.rows.flatMap((r) => r.actions ?? [])))
     const missing = keymap.ACTION_IDS.filter((action) => !listed.has(action))
     expect(missing).toEqual(['miniWindow'])
+  })
+
+  it('lists the mini window, after fullscreen, where the platform has one', () => {
+    const listed = new Set(
+      helpSectionSpecs(true).flatMap((s) => s.rows.flatMap((r) => r.actions ?? [])),
+    )
+    expect(keymap.ACTION_IDS.filter((action) => !listed.has(action))).toEqual([])
+    const cards = helpSectionSpecs(true).find((s) => s.title() === 'Cards')
+    const labels = cards?.rows.map((r) => r.label()) ?? []
+    expect(labels.slice(labels.indexOf('Fullscreen'), labels.indexOf('Fullscreen') + 2)).toEqual([
+      'Fullscreen',
+      'Open the mini window',
+    ])
+    expect(
+      helpSections(DEFAULTS, 'other', helpSectionSpecs(true)).flatMap((s) => s.rows),
+    ).toContainEqual({ label: 'Open the mini window', keys: ['T'] })
   })
 
   it('has unique row labels within each section, in the planned groups', () => {

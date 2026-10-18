@@ -75,20 +75,21 @@ Sources: [TinyBase synchronizers](https://tinybase.org/guides/synchronization/us
 ```
 src/
   core/       Pure TS, no DOM, no framework: timer and stopwatch engines, digit-entry parser, formatting, frame ticker, card model, keymap, settings schema
-  platform/   One interface, two implementations (web, tauri): accent color, notifications, audio, wake timer, fullscreen, ids, windows, hotkeys
+  platform/   One interface, two implementations (web, tauri): accent color, notifications, audio, wake timer, fullscreen, ids, mini window (Tauri window or Document PiP), global hotkeys, autostart, updater, activity, opener; the Tauri side loads lazily and only in desktop builds (`__DESKTOP__`)
   state/      Reactive app state (.svelte.ts): card store, alarm orchestration, keyboard controller, shared timer actions (apply typed digits, then act), presets
   sync/       TinyBase stores (synced and device-only), IndexedDB and localStorage persisters, tab sync, first-run seed (stamped at time zero), cards bridge with stamped settles, reconnecting WebSocket synchronizer with heartbeat, server-time offset, protocol copy
-  ui/         Components: theme (tokens, generated M3 scheme), primitives, card, grid, command palette, cheat sheet, settings dialog
+  ui/         Components: theme (tokens, generated M3 scheme), primitives, card, grid, command palette, cheat sheet, settings dialog, account, mini-window page
   i18n/       Locale state and reactive messages (compiled messages in src/paraglide, generated)
   pwa/        Service worker registration and the update prompt (web only)
 messages/     Translations: en.json, zh-TW.json, ja.json
 public/       PWA icons and the favicon
 e2e/          Playwright tests
-src-tauri/    Rust shell and plugins
+src-tauri/    Rust shell: tray, close policy, accent color, mini window, updater check, debug smoke hook; capabilities per window (app ACL)
+scripts/      Desktop smoke test (pnpm smoke:desktop)
 server/       Cloudflare Worker: routing, Better Auth, mailer and send limits, per-user SyncObject Durable Object, D1 migrations, workerd tests
 ```
 
-Status after M4 (2026-10-18): `src/core`, `src/platform` (web implementations only), `src/state` (including auth and the sync preference), `src/sync` (stores, persisters, tab sync, seed, cards bridge, remote sync, clock offset), `src/i18n`, `src/pwa`, `src/ui` (theme, primitives, card, grid, palette, cheat sheet, announcer, settings, account), `server/` (its own workspace package), `messages/`, `public/`, `e2e/` and `src-tauri` exist, with tests next to each module. The Tauri side of `platform/` comes in M5.
+Status after M5 (2026-10-18): every directory above exists with tests next to each module: `src/platform` has web and Tauri implementations (`src/platform/web`, `src/platform/tauri`), `src/ui/mini` holds the mini-window page, `src-tauri/src` the shell modules with Rust unit tests, `scripts/smoke-desktop.mjs` the scripted desktop smoke, and CI runs a Windows Rust job (fmt, clippy in debug and release, tests, cargo audit). M6 adds the release pipeline.
 
 Principles:
 
@@ -134,7 +135,7 @@ Client ──HTTPS──▶ Worker ── /api/auth/* ──▶ Better Auth ─�
 - Routes: `/api/auth/*`, `/api/time` (clock offset), `/api/config` (configured providers), `/api/sync` (WebSocket), `/api/export` (the user's store as JSON), `/__dev/otp` (development only).
 - Durable Objects use the WebSocket Hibernation API, so idle devices cost nothing. The store is persisted in JSON mode (one row per user; our data is far below the 2 MB row limit).
 - Free plan: 100,000 requests/day, and WebSocket messages count toward it. Fine for personal use; the Workers Paid plan ($5/month) once the app is public.
-- Local development: `pnpm server:dev` runs `wrangler dev` on port 8787 with local D1 and Durable Objects, and Vite proxies `/api` and `/__dev` to it, so the session cookie is first-party. End-to-end runs use their own state directory. Deployment: [deploy.md](deploy.md) and the manual `deploy.yml` workflow (secrets only on the migrate and deploy steps). The Worker bundle is minified with source maps uploaded (about 263 kB gzip).
+- Local development: `pnpm server:dev` runs `wrangler dev` on port 8787 with local D1 and Durable Objects, and Vite proxies `/api` and `/__dev` to it, so the session cookie is first-party. End-to-end runs use their own state directory. Deployment: [deploy.md](deploy.md) and the manual `deploy.yml` workflow (secrets only on the migrate and deploy steps). The Worker bundle is minified with source maps uploaded (about 263 kB gzip). Desktop origins (`tauri.localhost`, plus `BETTER_AUTH_URL` and `TRUSTED_ORIGINS`) get CORS headers on `/api/*`; desktop builds bake in `VITE_API_ORIGIN` from `TIMER_SERVER_ORIGIN` (default `http://localhost:8787`), and a release build refuses a non-https origin.
 - Exit path: TinyBase also ships a Node `WsServer`, and Better Auth runs on Node, so the server can move to a VPS later.
 
 ## Platform notes
@@ -150,12 +151,12 @@ Client ──HTTPS──▶ Worker ── /api/auth/* ──▶ Better Auth ─�
 ### Background alarms
 
 - **Web**: Chrome delays timers in hidden tabs (up to 1 minute after 5 minutes hidden). Track alarm deadlines in a Web Worker, show a `Notification`, and unlock audio during the Start click.
-- **Desktop**: schedule alarms in Rust, fire native notifications, keep running in the tray when the window closes.
+- **Desktop**: the webview keeps running while hidden to the tray, so the same wake worker rings on time (6–50 ms late in the smoke test); no Rust scheduler is needed. Native notifications come from the notification plugin; on desktop a click may not reach the app, so the tray and single-instance focus cover it.
 - **Mobile web**: cannot ring reliably while the phone is locked. Store apps would need native scheduled notifications.
 
-### Tauri plugins planned
+### Tauri plugins (M5)
 
-`notification`, `global-shortcut`, `single-instance`, `window-state`, `updater`, `autostart` (opt-in), `deep-link` (sign-in redirect from the system browser), plus the core `tray-icon` feature. No `store` plugin: TinyBase on IndexedDB holds all app data.
+`single-instance` (first), `window-state`, `notification`, `global-shortcut`, `autostart` (opt-in, `--minimized`), `updater` (placeholder key until M6), `process`, `opener`, plus the core `tray-icon` feature. `deep-link` was dropped: desktop sign-in uses device authorization. No `store` plugin: TinyBase on IndexedDB holds all app data. Capabilities are per window label (`main`, `mini`) with an app ACL that grants each command explicitly; the debug-only `smoke_mark` command is granted only in debug builds. The desktop services in `src/platform/tauri/` are compiled in only when `__DESKTOP__` is set (the Tauri CLI sets `TAURI_ENV_PLATFORM`), and a build guard fails any web build that loads them at startup.
 
 Bundle identifier: `com.timerapp.dev` is a placeholder until the final name is chosen (spec Q13). The content security policy in `tauri.conf.json` is still `null`; set a real one before release.
 
@@ -182,3 +183,4 @@ Bundle identifier: `com.timerapp.dev` is a placeholder until the final name is c
 - 2026-10-18: M3 planned. The device-only store moves from IndexedDB to localStorage (synchronous read before the first paint). Vitest gains a `client` project (jsdom, browser conditions) for rune-based modules. Placeholder PWA icon (spec Q22).
 - 2026-10-18: M3 done. TinyBase 10 synced `MergeableStore` on IndexedDB (3 s open timeout, memory fallback, never seeds over another tab) and a device store on localStorage, tabs in step over BroadcastChannel; Valibot settings and export schemas with migrations; settings dialog (appearance, behavior, keyboard rebinding, presets editor, data export/import, about) in a lazy chunk; Paraglide JS 2 messages for en, zh-TW and ja with live switching and per-language CJK font stacks; `vite-plugin-pwa` with a placeholder icon set; Vitest `client` project; 1903 unit tests, 79 Playwright tests. Bundle: main 89 kB gzip, settings 22 kB lazy, color library 20 kB lazy; rolldown `manualPureFunctions` drops unused TinyBase modules.
 - 2026-10-18: M4 done. `server/` workspace package: Cloudflare Worker with Better Auth 1.7 on D1 (email code, Google, GitHub, Apple; bearer and device-authorization plugins), one `SyncObject` Durable Object per user (TinyBase `WsServerDurableObject`, SQLite JSON persister), `/api/time`, `/api/config`, `/api/export`; `@cloudflare/vitest-plugin` tests on workerd (99). Client: auth state on the Better Auth client, reconnecting WebSocket synchronizer with heartbeat and session re-checks, clock offset through `appClock`, Account section, `/device` approval page, sync status button. Playwright starts `wrangler dev` beside Vite (103 e2e tests); 2131 unit tests. Deviations: `APP_ENV` defaults to production in `wrangler.jsonc`; the `?token=` fallback was dropped (subprotocol only); seed rows stamped at time zero; `partysocket` replaced by a small reconnecting socket. Bundle: startup JS 116 kB gzip (entry 68 kB plus a shared 48 kB chunk holding the Svelte runtime, Valibot and the 11 kB Better Auth client), total 177 kB; precache 728 KB. Docs: deploy.md, privacy.md (draft, Q23).
+- 2026-10-18: M5 done. Tauri shell: tray with close-to-tray policy, OS accent color with live changes on Windows, mini window commands, `--minimized`, single instance, window state (excluding the visible flag), updater check with a placeholder key, debug-only smoke hook; Windows launch-at-login entry quoted by the shell. Platform services behind `src/platform` with `mockIPC` tests; Document Picture-in-Picture fallback on the web; server CORS for desktop origins; Settings › Desktop, mini-window page, desktop device-code sign-in, update prompt. Deviations: `desktop` and `auth` are separate device-store groups rather than `DeviceSettings` fields (so exports never carry the token or another machine's hotkeys), no settings schema version bump; `cargo audit` ignores three `zip` advisories reached through the updater (signatures are verified before extraction); `@tauri-apps/plugin-window-state` JS package unused (remove in M6). Verified: 2375 unit, 110 server, 108 e2e, 51 Rust tests, 17-check desktop smoke (hidden-window alarm within 50 ms, hotkey from another app, device sign-in, second instance). Startup JS re-baselined at about 124 kB gzip (entry 62 kB; the mini route's shared chunks add about 7 kB over M4), total 197 kB.

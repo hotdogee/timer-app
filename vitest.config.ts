@@ -5,6 +5,8 @@ import viteConfig from './vite.config.ts'
 export default mergeConfig(
   viteConfig,
   defineConfig({
+    // The tests cover the desktop code too (vite.config.ts sets it for desktop builds only).
+    define: { __DESKTOP__: 'true' },
     test: {
       // Vitest blanks CSS imports by default; the precomputed theme is read as text (`?raw`), and
       // a test reads the font stacks in tokens.css.

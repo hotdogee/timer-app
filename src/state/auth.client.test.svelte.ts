@@ -24,7 +24,7 @@ function setup() {
     },
     refreshSession: () => Promise.resolve(),
     sendCode: () => Promise.resolve(OK),
-    verifyCode: () => Promise.resolve({ ok: true, value: ANN }),
+    verifyCode: () => Promise.resolve({ ok: true, value: { user: ANN, token: null } }),
     signInSocial: () => Promise.resolve(OK),
     signOut: () => Promise.resolve(OK),
     deleteUser: () => Promise.resolve(OK),

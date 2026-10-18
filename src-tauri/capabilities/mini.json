@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mini",
+  "description": "The always-on-top mini window: one card, themed with the accent color, which it can close, pin on top and drag by its header, and which hears the main window switch its card.",
+  "windows": ["mini"],
+  "platforms": ["windows", "macOS", "linux"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "allow-accent-color",
+    "allow-close-mini",
+    "allow-set-mini-always-on-top"
+  ]
+}

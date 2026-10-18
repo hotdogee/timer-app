@@ -2,7 +2,7 @@ import { Agent } from 'node:http'
 
 import { paraglideVitePlugin } from '@inlang/paraglide-js'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 import pkg from './package.json' with { type: 'json' }
@@ -11,6 +11,43 @@ import pkg from './package.json' with { type: 'json' }
 const tauriDevHost = process.env.TAURI_DEV_HOST
 /** Tauri sets this to 'true' for `tauri dev` and `tauri build --debug`. */
 const tauriDebug = process.env.TAURI_ENV_DEBUG === 'true'
+/** Set by the Tauri CLI (`tauri dev`, `tauri build`) to the target OS: `windows`, `macos`, … */
+const tauriPlatform = process.env.TAURI_ENV_PLATFORM
+/**
+ * Whether this is a desktop build (`__DESKTOP__` in the code): one the Tauri CLI runs. A web build
+ * leaves the desktop-only code out (the Tauri services, the shell wiring, the update prompt), so
+ * the web bundle carries none of it.
+ */
+const desktop = tauriPlatform !== undefined
+/**
+ * The sync server's origin in desktop builds, which the app reaches across origins with a bearer
+ * token (spec › Sync › Desktop sign-in): the desktop app is served from its own origin
+ * (`http://tauri.localhost` on Windows), so the API cannot be relative as on the web. Set it with
+ * `TIMER_SERVER_ORIGIN` when running the Tauri CLI; the default is the local `wrangler dev` (M6
+ * sets the production origin). An explicit `VITE_API_ORIGIN` wins. Web builds keep the page's
+ * own origin (see src/sync/api.ts).
+ */
+const desktopApiOrigin = desktop
+  ? (process.env.VITE_API_ORIGIN ?? process.env.TIMER_SERVER_ORIGIN ?? 'http://localhost:8787')
+  : undefined
+
+/**
+ * A release desktop build (`tauri build` without `--debug`) talks to the sync server over HTTPS
+ * only: emailed codes, the device sign-in and the bearer token must never cross the network in
+ * the clear, or reach whatever listens on the user's port 8787. `TIMER_ALLOW_INSECURE_ORIGIN=1`
+ * lets a local release build use `http://` for testing.
+ */
+if (
+  desktop &&
+  !tauriDebug &&
+  !desktopApiOrigin?.startsWith('https://') &&
+  process.env.TIMER_ALLOW_INSECURE_ORIGIN !== '1'
+) {
+  throw new Error(
+    `A release desktop build needs an https:// sync server, not ${String(desktopApiOrigin)}. ` +
+      'Set TIMER_SERVER_ORIGIN=https://… (or TIMER_ALLOW_INSECURE_ORIGIN=1 for a local test build).',
+  )
+}
 /** The oldest engines the app supports: the first with container queries and :has(). */
 const browserTargets = ['chrome105', 'edge105', 'firefox110', 'safari16']
 /**
@@ -36,10 +73,83 @@ const apiProxy = {
   '/__dev': { target: apiTarget, agent: apiAgent },
 }
 
+/** Whether a module id is part of a `@tauri-apps/*` package. */
+function isTauriModule(id: string): boolean {
+  return id.replaceAll('\\', '/').includes('/node_modules/@tauri-apps/')
+}
+
+/** The app's desktop-only modules, which a web build leaves out (`__DESKTOP__`). */
+const DESKTOP_ONLY_MODULES = [
+  /\/src\/platform\/tauri\//,
+  /\/src\/state\/desktop\.svelte\.ts$/,
+  /\/src\/ui\/UpdatePrompt\.svelte/,
+]
+
+/** Whether a module id is desktop-only code of the app. */
+function isDesktopModule(id: string): boolean {
+  const path = id.replaceAll('\\', '/')
+  return DESKTOP_ONLY_MODULES.some((pattern) => pattern.test(path))
+}
+
+/**
+ * Fails the build when a `@tauri-apps/*` module lands in a chunk the page loads at startup: an
+ * entry chunk or any chunk it imports statically. The desktop services load through dynamic
+ * `import()` (src/platform/tauri/), so the web bundle never downloads them (tech-stack.md ›
+ * Principles, "Platform features sit behind interfaces"). A web build also fails when any of the
+ * app's desktop-only modules ({@link DESKTOP_ONLY_MODULES}) loads at startup: `__DESKTOP__` should
+ * have left them out.
+ */
+function tauriStaysLazy(): Plugin {
+  return {
+    name: 'timer-app:tauri-stays-lazy',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const chunks = new Map(
+        Object.values(bundle).flatMap((output) =>
+          output.type === 'chunk' ? [[output.fileName, output] as const] : [],
+        ),
+      )
+      const startup = new Set<string>()
+      const visit = (fileName: string): void => {
+        if (startup.has(fileName)) return
+        const chunk = chunks.get(fileName)
+        if (chunk === undefined) return
+        startup.add(fileName)
+        for (const imported of chunk.imports) visit(imported)
+      }
+      for (const chunk of chunks.values()) if (chunk.isEntry) visit(chunk.fileName)
+      for (const fileName of startup) {
+        const chunk = chunks.get(fileName)
+        // The modules whose code the chunk carries: a module the bundler shook out entirely is
+        // still listed, with nothing rendered.
+        const moduleIds = (chunk?.moduleIds ?? []).filter(
+          (id) => (chunk?.modules[id]?.renderedLength ?? 0) > 0,
+        )
+        const tauriModule = moduleIds.find(isTauriModule)
+        if (tauriModule !== undefined) {
+          this.error(
+            `${tauriModule} is in ${fileName}, which loads at startup. Import @tauri-apps/* ` +
+              'only from src/platform/tauri/, through dynamic import().',
+          )
+        }
+        const desktopModules = desktop ? [] : moduleIds.filter(isDesktopModule)
+        if (desktopModules.length > 0) {
+          this.error(
+            `${desktopModules.join(', ')} ${desktopModules.length === 1 ? 'is' : 'are'} ` +
+              `desktop-only but in ${fileName}, which the web build loads at startup. Reach ` +
+              'desktop-only code only behind __DESKTOP__.',
+          )
+        }
+      }
+    },
+  }
+}
+
 // Tauri-friendly settings follow https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
   plugins: [
     svelte(),
+    tauriStaysLazy(),
     // Keep these options in step with the `i18n:compile` script in package.json.
     ...(vitest
       ? []
@@ -95,6 +205,10 @@ export default defineConfig({
   define: {
     // The About section shows it.
     __APP_VERSION__: JSON.stringify(pkg.version),
+    __DESKTOP__: JSON.stringify(desktop),
+    ...(desktopApiOrigin === undefined
+      ? {}
+      : { 'import.meta.env.VITE_API_ORIGIN': JSON.stringify(desktopApiOrigin) }),
   },
   // Keep Rust compiler output visible when running under `tauri dev`.
   clearScreen: false,

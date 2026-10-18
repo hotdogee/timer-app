@@ -203,8 +203,7 @@ test('F shows the selected card fullscreen and F again leaves; M mutes it', asyn
   await expect(mute).toHaveAttribute('aria-pressed', 'true')
   await page.keyboard.press('m')
   await expect(mute).toHaveAttribute('aria-pressed', 'false')
-  // The mini window waits for the desktop app (M5).
-  await expect(card.getByRole('button', { name: 'Mini window', includeHidden: true })).toBeHidden()
+  // The mini window's button and T: mini.spec.ts.
 })
 
 test('a card dragged by its handle in edit mode moves; Esc mid-drag puts it back', async ({

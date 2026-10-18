@@ -6,7 +6,9 @@
   it here, and anything else becomes the action's shortcut at once. Reset gives one action its
   default back, and the section's Reset all gives every action its default; each change is
   announced. A key that several actions have already (from an import, or recorded on another
-  platform) is flagged on each of their rows.
+  platform) is flagged on each of their rows. The mini window's shortcut is listed only where there
+  is a mini window (`miniWindow`, the platform's by default). In the desktop app (`desktop`) the
+  description points to Settings › Desktop for the global shortcuts.
 
   ```svelte
   <KeyboardSection {settingsStore} platform="other" />
@@ -18,6 +20,7 @@
   import { keymap } from '../../core'
   import { localeState, m } from '../../i18n'
   import { actionName } from '../../i18n/labels'
+  import { platform as appPlatform } from '../../platform'
   import type { SettingsStore } from '../../state/settings.svelte'
   import { announce } from '../announce.svelte'
   import KeyLabel from '../KeyLabel.svelte'
@@ -26,11 +29,12 @@
   import Icon from '../primitives/Icon.svelte'
   import Glyph from './Glyph.svelte'
   import {
-    SHORTCUT_GROUPS,
+    HIDDEN_ACTIONS,
     boundKeys,
     classifyRecording,
     isCustomized,
     sharedShortcuts,
+    shortcutGroups,
     withDefaultShortcut,
     withShortcut,
     withoutShortcut,
@@ -43,9 +47,18 @@
     settingsStore: SettingsStore
     /** The modifier convention for key labels and recording (`Mod` is Cmd on `'mac'`). */
     platform: keymap.Platform
+    /** Whether there is a mini window to list the shortcut of. */
+    miniWindow?: boolean
+    /** The desktop app, whose global shortcuts are in Settings › Desktop. */
+    desktop?: boolean
   }
 
-  let { settingsStore, platform }: Props = $props()
+  let {
+    settingsStore,
+    platform,
+    miniWindow = appPlatform.windows.supported,
+    desktop = appPlatform.kind === 'tauri',
+  }: Props = $props()
 
   const uid = $props.id()
 
@@ -63,13 +76,16 @@
 
   let root = $state<HTMLElement>()
 
+  /** Actions not listed here: the mini window's where there is none. */
+  const hidden = $derived(miniWindow ? [] : HIDDEN_ACTIONS)
+  const groups = $derived(shortcutGroups(hidden))
   const overrides = $derived(settingsStore.synced.keymap)
   const bindings = $derived(settingsStore.bindings)
   /**
    * Keys that several actions have, as an import or settings recorded on another platform can
    * leave them (only the first action gets the key): each such row says so.
    */
-  const shared = $derived(sharedShortcuts(bindings, platform))
+  const shared = $derived(sharedShortcuts(bindings, platform, hidden))
 
   function rowId(action: keymap.ActionId): string {
     return `${uid}-${action}`
@@ -107,7 +123,7 @@
   }
 
   function record(action: keymap.ActionId, combo: keymap.KeyCombo) {
-    const result = classifyRecording(bindings, action, combo, platform)
+    const result = classifyRecording(bindings, action, combo, platform, hidden)
     if (result.kind === 'reserved') {
       recordError = m.shortcut_reserved({ key: result.label })
       return
@@ -166,12 +182,14 @@
   <!-- The button's name starts with its visible "Reset all", as speech input needs. -->
   <SectionHeader
     title={m.settings_section_keyboard()}
-    description={m.settings_keyboard_description()}
+    description={desktop
+      ? m.settings_keyboard_description_desktop()
+      : m.settings_keyboard_description()}
     resetLabel={m.shortcut_reset_all()}
     resetName={m.shortcut_reset_all_label()}
     onreset={resetAll}
   />
-  {#each SHORTCUT_GROUPS as group, g (g)}
+  {#each groups as group, g (g)}
     <section class="group" aria-labelledby={`${uid}-group-${String(g)}`}>
       <h4 id={`${uid}-group-${String(g)}`}>{group.title()}</h4>
       <ul>

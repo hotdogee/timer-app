@@ -162,6 +162,119 @@ describe('createSettingsStore', () => {
   })
 })
 
+describe('desktop settings and the bearer token', () => {
+  const EXPIRES = Date.UTC(2026, 10, 17)
+
+  it('start as the defaults and no token on empty stores', () => {
+    const { store } = setup()
+    expect(store.desktop).toEqual(settings.DESKTOP_DEFAULTS)
+    expect(store.auth).toBeNull()
+  })
+
+  it('start with what the device store already holds', () => {
+    const stores = createAppStores()
+    stores.device.setValues({
+      closeBehavior: 'quit',
+      hotkeyShowApp: 'Mod+Shift+T',
+      authToken: 'abc',
+      authExpiresAt: EXPIRES,
+    })
+    const { store } = setup(stores)
+    expect(store.desktop).toEqual({
+      ...settings.DESKTOP_DEFAULTS,
+      closeBehavior: 'quit',
+      hotkeys: { toggleLast: null, showApp: 'Mod+Shift+T' },
+    })
+    expect(store.auth).toEqual({ token: 'abc', expiresAt: EXPIRES })
+  })
+
+  it('write only the desktop values that changed, with the schema version the first time', () => {
+    const { store, transactions } = setup()
+    store.updateDesktop({ launchAtLogin: true })
+    expect(transactions().device).toEqual([{ launchAtLogin: true, schemaVersion: 1 }])
+    store.updateDesktop({ launchAtLogin: true, hotkeys: { toggleLast: 'Mod+Shift+Space' } })
+    expect(transactions().device).toEqual([{ hotkeyToggleLast: 'Mod+Shift+Space' }])
+    store.updateDesktop({ hotkeys: { showApp: 'Mod+Shift+T' } })
+    expect(store.desktop.hotkeys).toEqual({ toggleLast: 'Mod+Shift+Space', showApp: 'Mod+Shift+T' })
+    transactions()
+    store.updateDesktop({ hotkeys: { toggleLast: null } })
+    expect(transactions().device).toEqual([{ hotkeyToggleLast: '' }])
+    expect(store.desktop.hotkeys).toEqual({ toggleLast: null, showApp: 'Mod+Shift+T' })
+  })
+
+  it('validate desktop updates, and keep the snapshot for one that changes nothing', () => {
+    const { store, transactions } = setup()
+    const desktop = store.desktop
+    store.updateDesktop({ closeBehavior: 'tray-while-running', hotkeys: {} })
+    expect(transactions().device).toEqual([])
+    expect(store.desktop).toBe(desktop)
+    store.updateDesktop({
+      closeBehavior: 'explode' as settings.CloseBehavior,
+      hotkeys: { showApp: 'Hyper+K' },
+    })
+    expect(store.desktop).toBe(desktop)
+  })
+
+  it('reset the desktop settings alone, and Appearance › Reset leaves them and the token', () => {
+    const { store, transactions } = setup()
+    store.updateDevice({ themeMode: 'dark' })
+    store.updateDesktop({ miniAlwaysOnTop: false, hotkeys: { showApp: 'Mod+Shift+T' } })
+    store.setAuth({ token: 'abc', expiresAt: EXPIRES })
+    transactions()
+    store.resetDevice()
+    expect(store.desktop.miniAlwaysOnTop).toBe(false)
+    expect(store.auth).not.toBeNull()
+    expect(transactions().device).toEqual([{ themeMode: 'system' }])
+    store.resetDesktop()
+    expect(store.desktop).toEqual(settings.DESKTOP_DEFAULTS)
+    expect(transactions().device).toEqual([{ miniAlwaysOnTop: true, hotkeyShowApp: '' }])
+    expect(store.auth).toEqual({ token: 'abc', expiresAt: EXPIRES })
+  })
+
+  it('store a token, replace it, and delete it on sign-out', () => {
+    const { stores, store, transactions } = setup()
+    store.setAuth({ token: 'abc', expiresAt: EXPIRES })
+    expect(store.auth).toEqual({ token: 'abc', expiresAt: EXPIRES })
+    expect(transactions().device).toEqual([
+      { authToken: 'abc', authExpiresAt: EXPIRES, schemaVersion: 1 },
+    ])
+    const auth = store.auth
+    store.setAuth({ token: 'abc', expiresAt: EXPIRES })
+    expect(transactions().device).toEqual([])
+    expect(store.auth).toBe(auth)
+    store.setAuth({ token: 'def', expiresAt: EXPIRES })
+    expect(transactions().device).toEqual([{ authToken: 'def' }])
+    store.setAuth(null)
+    expect(store.auth).toBeNull()
+    expect(stores.device.hasValue('authToken')).toBe(false)
+    expect(stores.device.hasValue('authExpiresAt')).toBe(false)
+    expect(stores.device.hasValue('schemaVersion')).toBe(true)
+  })
+
+  it('remove the token when given an invalid one', () => {
+    const { stores, store } = setup()
+    store.setAuth({ token: 'abc', expiresAt: EXPIRES })
+    store.setAuth({ token: 'not a token', expiresAt: EXPIRES })
+    expect(store.auth).toBeNull()
+    expect(stores.device.hasValue('authToken')).toBe(false)
+  })
+
+  it("follow another window's writes", () => {
+    const { stores, store } = setup()
+    stores.device.setValues({ hotkeyToggleLast: 'Mod+Shift+Space', authToken: 'abc' })
+    expect(store.desktop.hotkeys.toggleLast).toBe('Mod+Shift+Space')
+    expect(store.auth).toBeNull()
+    const hotkeys = store.desktop.hotkeys
+    stores.device.setValue('authExpiresAt', EXPIRES)
+    expect(store.auth).toEqual({ token: 'abc', expiresAt: EXPIRES })
+    stores.device.setValue('closeBehavior', 'tray')
+    expect(store.desktop.closeBehavior).toBe('tray')
+    expect(store.desktop.hotkeys).toBe(hotkeys)
+    stores.device.delValue('authToken')
+    expect(store.auth).toBeNull()
+  })
+})
+
 describe('settingsStore', () => {
   it("follows the app's stores", () => {
     expect(settingsStore.device).toEqual(settings.DEVICE_DEFAULTS)

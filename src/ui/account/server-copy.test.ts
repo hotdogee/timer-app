@@ -91,6 +91,19 @@ describe('downloadServerCopy', () => {
     expect(revoked).toEqual(['blob:1'])
   })
 
+  it('sends the desktop app’s bearer token instead of the cookie', async () => {
+    const fetch = respond(COPY)
+    const { env } = environment()
+    await downloadServerCopy({ url: '/api/export', fetch, environment: env, token: 'tok' })
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/export',
+      expect.objectContaining({
+        credentials: 'omit',
+        headers: { Accept: 'application/json', Authorization: 'Bearer tok' },
+      }),
+    )
+  })
+
   it('rejects with the status when the server refuses (signed out)', async () => {
     const { env, links } = environment()
     const result = downloadServerCopy({

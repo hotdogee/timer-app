@@ -45,6 +45,11 @@ export interface CommandContext {
    * first, as Space does (spec › Shortcuts); without it nothing counts as typed.
    */
   readonly takeTyped?: (() => DigitBuffer) | undefined
+  /**
+   * Whether the platform has a mini window (`platform.windows.supported`): its command shows only
+   * then. False by default.
+   */
+  readonly miniWindow?: boolean | undefined
 }
 
 export interface Command {
@@ -192,6 +197,17 @@ function cardCommands(ctx: CommandContext, card: cards.Card): Command[] {
       icon: 'fullscreen',
       run: () => {
         actions.toggleFullscreen(id)
+      },
+    },
+    {
+      id: 'mini-window',
+      title: m.command_mini_window(),
+      hint,
+      shortcut: 'miniWindow',
+      icon: 'picture_in_picture_alt',
+      when: ctx.miniWindow === true,
+      run: () => {
+        actions.miniWindow(id)
       },
     },
     {

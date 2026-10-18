@@ -142,17 +142,21 @@
     inline-size: 100%;
   }
 
-  .button:disabled {
+  /* `aria-disabled` looks the same but keeps the focus (a button that is busy for a moment). */
+  .button:disabled,
+  .button[aria-disabled='true'] {
     background: color-mix(in srgb, var(--md-sys-color-on-surface) 12%, transparent);
     color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
     cursor: default;
   }
 
-  .text:disabled {
+  .text:disabled,
+  .text[aria-disabled='true'] {
     background: transparent;
   }
 
-  .button:disabled::before {
+  .button:disabled::before,
+  .button[aria-disabled='true']::before {
     opacity: 0;
   }
 
@@ -172,7 +176,8 @@
       display: none;
     }
 
-    .button:disabled {
+    .button:disabled,
+    .button[aria-disabled='true'] {
       border-color: GrayText;
       color: GrayText;
     }
