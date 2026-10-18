@@ -1,0 +1,46 @@
+// Cloudflare Worker config: serves the web app (../dist) and the API at one origin.
+// Local development needs no Cloudflare account: `pnpm server:dev` runs everything with local D1
+// and Durable Objects. Production values (secrets, the D1 id, the domain) come from docs/deploy.md.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "timer-app",
+  "main": "src/index.ts",
+  // The newest date the pinned workerd runtime supports; newer dates make wrangler fall back.
+  "compatibility_date": "2026-10-12",
+  "compatibility_flags": ["nodejs_compat"],
+  // Every cold start (and every Durable Object isolate, same script) parses the bundle: minified it
+  // is about 940 KiB instead of 2.2 MB. The source maps keep stack traces in the logs readable.
+  "minify": true,
+  "upload_source_maps": true,
+  "assets": {
+    "directory": "../dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Only these paths run the Worker first; any other path is served from dist/ (index.html when
+    // no file matches) without running it.
+    "run_worker_first": ["/api/*", "/__dev/*"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "timer-app-auth",
+      // Local development works with this placeholder; paste the real id after `wrangler d1 create`.
+      "database_id": "REPLACE_AFTER_D1_CREATE",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "SYNC", "class_name": "SyncObject" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SyncObject"] }],
+  "vars": {
+    // Fail safe: a plain `wrangler deploy` is production. `.dev.vars` (copied from
+    // `.dev.vars.example`), the e2e servers and the tests set APP_ENV=development, which turns on
+    // the dev-only `/__dev/otp` endpoint.
+    "APP_ENV": "production",
+  },
+  // Secrets are listed in .dev.vars.example (local values go in .dev.vars; production uses
+  // `wrangler secret put`). No `secrets` block here on purpose: with one, wrangler dev would drop
+  // every .dev.vars entry it does not list, and the optional ones (mailer, OAuth) must stay optional.
+  "observability": { "enabled": true },
+}

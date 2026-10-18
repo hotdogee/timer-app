@@ -31,11 +31,12 @@ One TypeScript web codebase, shipped two ways:
 | Schemas | Valibot with versioned migrations | Validates settings and imported data. |
 | Sync | TinyBase `MergeableStore` over WebSocket | Per-field newest-wins merge with hybrid logical clocks. The local store stays the source of truth. |
 | Server | Cloudflare Workers + Durable Objects | One Durable Object per user holds their store in its built-in SQLite. Idle connections hibernate and cost nothing. See [Server](#server). |
-| Auth | Better Auth on D1 (Drizzle or Kysely adapter) | Runs in our Worker: email code, Google, Apple, GitHub. |
-| Email | Resend | Sends sign-in codes; called from the Worker with `fetch`. |
+| Auth | Better Auth 1.7 on D1 (built-in Kysely adapter) | Runs in our Worker with the `emailOTP`, `bearer` and `deviceAuthorization` plugins: email code, Google, Apple, GitHub (providers appear only when configured); rate limits and send limits in D1; sessions last 30 days. |
+| Email | Resend | Sends sign-in codes; called from the Worker with `fetch`, English only for now. Without a key, production refuses to send; development logs the code and serves it on a dev-only endpoint for tests. |
 | Offline / install | `vite-plugin-pwa` (Workbox `generateSW`, prompt mode) | Precaches the app, fonts and icons (about 610 KB); an update shows the "Update ready" snackbar. Not registered inside Tauri. |
-| Unit tests | Vitest with fake timers; a `client` project (jsdom, fake-indexeddb, browser conditions) for rune-based modules | Timer engine, digit-entry parser, migrations, stores and persisters, settings dialog. |
-| E2E tests | Playwright (Chromium) | Keyboard flows, alarm orchestration, focus, responsive breakpoints, frame-loop checks; the page clock is faked, so timing tests are exact. Locally they run against the dev server, in CI against the production build. Light/dark screenshots are saved as artifacts, not pixel-asserted, because CI runs Linux and development runs Windows. |
+| Unit tests | Vitest with fake timers; a `client` project (jsdom, fake-indexeddb, browser conditions) for rune-based modules | Timer engine, digit-entry parser, migrations, stores and persisters, settings dialog, auth state, sync controller with a fake WebSocket. |
+| Server tests | Vitest with `@cloudflare/vitest-plugin` (workerd, real D1 with the migrations applied, real Durable Objects) | Auth flows and limits, the sync gate and the Durable Object, export, deletion, dev endpoint off in production. |
+| E2E tests | Playwright (Chromium) | Keyboard flows, alarm orchestration, focus, responsive breakpoints, frame-loop checks; the page clock is faked, so timing tests are exact. Locally they run against the dev server, in CI against the production build. Light/dark screenshots are saved as artifacts, not pixel-asserted, because CI runs Linux and development runs Windows. Since M4 Playwright also starts `wrangler dev` (local D1 and Durable Objects, fresh state per run) and covers sign-in, two-device sync, the device page and clock offsets. |
 | CI / release | GitHub Actions + `tauri-action` | Builds and signs for all three desktop OSes. |
 
 ## Alternatives considered
@@ -76,7 +77,7 @@ src/
   core/       Pure TS, no DOM, no framework: timer and stopwatch engines, digit-entry parser, formatting, frame ticker, card model, keymap, settings schema
   platform/   One interface, two implementations (web, tauri): accent color, notifications, audio, wake timer, fullscreen, ids, windows, hotkeys
   state/      Reactive app state (.svelte.ts): card store, alarm orchestration, keyboard controller, shared timer actions (apply typed digits, then act), presets
-  sync/       TinyBase stores (synced and device-only), IndexedDB and localStorage persisters, tab sync, first-run seed, cards bridge; WebSocket synchronizer and server-time offset come in M4
+  sync/       TinyBase stores (synced and device-only), IndexedDB and localStorage persisters, tab sync, first-run seed (stamped at time zero), cards bridge with stamped settles, reconnecting WebSocket synchronizer with heartbeat, server-time offset, protocol copy
   ui/         Components: theme (tokens, generated M3 scheme), primitives, card, grid, command palette, cheat sheet, settings dialog
   i18n/       Locale state and reactive messages (compiled messages in src/paraglide, generated)
   pwa/        Service worker registration and the update prompt (web only)
@@ -84,10 +85,10 @@ messages/     Translations: en.json, zh-TW.json, ja.json
 public/       PWA icons and the favicon
 e2e/          Playwright tests
 src-tauri/    Rust shell and plugins
-server/       Cloudflare Worker: auth routes, sync endpoint, per-user Durable Object
+server/       Cloudflare Worker: routing, Better Auth, mailer and send limits, per-user SyncObject Durable Object, D1 migrations, workerd tests
 ```
 
-Status after M3 (2026-10-18): `src/core`, `src/platform` (web implementations only), `src/state`, `src/sync` (stores, persisters, tab sync, first-run seed, cards bridge), `src/i18n`, `src/pwa`, `src/ui` (theme, primitives, card, grid, palette, cheat sheet, announcer, settings), `messages/`, `public/`, `e2e/` and `src-tauri` exist, with tests next to each module. `server/` and the WebSocket synchronizer are planned for M4; the Tauri side of `platform/` comes in M5.
+Status after M4 (2026-10-18): `src/core`, `src/platform` (web implementations only), `src/state` (including auth and the sync preference), `src/sync` (stores, persisters, tab sync, seed, cards bridge, remote sync, clock offset), `src/i18n`, `src/pwa`, `src/ui` (theme, primitives, card, grid, palette, cheat sheet, announcer, settings, account), `server/` (its own workspace package), `messages/`, `public/`, `e2e/` and `src-tauri` exist, with tests next to each module. The Tauri side of `platform/` comes in M5.
 
 Principles:
 
@@ -128,10 +129,12 @@ Client ──HTTPS──▶ Worker ── /api/auth/* ──▶ Better Auth ─�
                                 DurableObjectSqlStoragePersister (the user's cards)
 ```
 
-- The same Worker serves the web app as static assets.
-- Durable Objects use the WebSocket Hibernation API, so idle devices cost nothing.
+- The same Worker serves the web app as static assets (`public/_headers` adds the page security headers).
+- Auth gate: the browser uses the session cookie; desktop (M5) sends a bearer token in `Sec-WebSocket-Protocol: timer-auth.<token>`. The Worker forwards the upgrade to the user's Durable Object with the session id and expiry in internal headers; the object checks them on every message and closes sockets (4401) on sign-out, revocation or deletion. Heartbeat: client ping every 30 s, `setWebSocketAutoResponse` pong.
+- Routes: `/api/auth/*`, `/api/time` (clock offset), `/api/config` (configured providers), `/api/sync` (WebSocket), `/api/export` (the user's store as JSON), `/__dev/otp` (development only).
+- Durable Objects use the WebSocket Hibernation API, so idle devices cost nothing. The store is persisted in JSON mode (one row per user; our data is far below the 2 MB row limit).
 - Free plan: 100,000 requests/day, and WebSocket messages count toward it. Fine for personal use; the Workers Paid plan ($5/month) once the app is public.
-- Local development runs everything with `wrangler dev`.
+- Local development: `pnpm server:dev` runs `wrangler dev` on port 8787 with local D1 and Durable Objects, and Vite proxies `/api` and `/__dev` to it, so the session cookie is first-party. End-to-end runs use their own state directory. Deployment: [deploy.md](deploy.md) and the manual `deploy.yml` workflow (secrets only on the migrate and deploy steps). The Worker bundle is minified with source maps uploaded (about 263 kB gzip).
 - Exit path: TinyBase also ships a Node `WsServer`, and Better Auth runs on Node, so the server can move to a VPS later.
 
 ## Platform notes
@@ -178,3 +181,4 @@ Bundle identifier: `com.timerapp.dev` is a placeholder until the final name is c
 - 2026-10-18: M2 done. Material 3 timer and stopwatch cards, responsive grid with edit mode and drag or keyboard reorder, rebindable keymap and keyboard controller, command palette, cheat sheet, alarm orchestration (synthesized sounds, notifications, wake worker), fullscreen with overlay fallback, Playwright e2e (50 tests) in CI; 1371 unit tests. Card colors use palette tones instead of `surface-container`; the default theme is precomputed; build target raised to Chrome 105 / Safari 16.
 - 2026-10-18: M3 planned. The device-only store moves from IndexedDB to localStorage (synchronous read before the first paint). Vitest gains a `client` project (jsdom, browser conditions) for rune-based modules. Placeholder PWA icon (spec Q22).
 - 2026-10-18: M3 done. TinyBase 10 synced `MergeableStore` on IndexedDB (3 s open timeout, memory fallback, never seeds over another tab) and a device store on localStorage, tabs in step over BroadcastChannel; Valibot settings and export schemas with migrations; settings dialog (appearance, behavior, keyboard rebinding, presets editor, data export/import, about) in a lazy chunk; Paraglide JS 2 messages for en, zh-TW and ja with live switching and per-language CJK font stacks; `vite-plugin-pwa` with a placeholder icon set; Vitest `client` project; 1903 unit tests, 79 Playwright tests. Bundle: main 89 kB gzip, settings 22 kB lazy, color library 20 kB lazy; rolldown `manualPureFunctions` drops unused TinyBase modules.
+- 2026-10-18: M4 done. `server/` workspace package: Cloudflare Worker with Better Auth 1.7 on D1 (email code, Google, GitHub, Apple; bearer and device-authorization plugins), one `SyncObject` Durable Object per user (TinyBase `WsServerDurableObject`, SQLite JSON persister), `/api/time`, `/api/config`, `/api/export`; `@cloudflare/vitest-plugin` tests on workerd (99). Client: auth state on the Better Auth client, reconnecting WebSocket synchronizer with heartbeat and session re-checks, clock offset through `appClock`, Account section, `/device` approval page, sync status button. Playwright starts `wrangler dev` beside Vite (103 e2e tests); 2131 unit tests. Deviations: `APP_ENV` defaults to production in `wrangler.jsonc`; the `?token=` fallback was dropped (subprotocol only); seed rows stamped at time zero; `partysocket` replaced by a small reconnecting socket. Bundle: startup JS 116 kB gzip (entry 68 kB plus a shared 48 kB chunk holding the Svelte runtime, Valibot and the 11 kB Better Auth client), total 177 kB; precache 728 KB. Docs: deploy.md, privacy.md (draft, Q23).

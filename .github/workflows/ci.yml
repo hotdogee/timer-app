@@ -33,9 +33,12 @@ jobs:
       - run: pnpm check
       - run: pnpm lint
       - run: pnpm test
+      # Worker integration tests in workerd (local D1 and Durable Objects; no Cloudflare account).
+      - run: pnpm test:server
       - run: pnpm build
 
-      # End-to-end tests run against the production build (`pnpm preview`; see playwright.config.ts).
+      # End-to-end tests run against the production build, served with the API by wrangler dev
+      # (E2E_SERVER=preview, the CI default; see playwright.config.ts).
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
 

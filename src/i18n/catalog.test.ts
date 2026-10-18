@@ -68,6 +68,8 @@ const SAME_IN_EVERY_LOCALE = new Set([
   'app_name',
   'settings_font_roboto_flex',
   'settings_font_inter',
+  // A pattern only: "{title} – {app}".
+  'device_page_title',
 ])
 
 describe('message files', () => {

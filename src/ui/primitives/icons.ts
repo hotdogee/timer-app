@@ -3,7 +3,7 @@
  * icons ship. Every symbol is one `<path>` on a `0 -960 960 960` view box; we keep the path data.
  *
  * The four arrows draw the arrow keys on key caps (`KeyLabel.svelte`) and the presets' reorder
- * buttons. Play, pause and the volume icons use the filled variant, as the reference card does
+ * buttons. The clouds are the sync status (the action bar, Settings › Account). Play, pause and the volume icons use the filled variant, as the reference card does
  * (docs/design/card-*.png). `done` is the same glyph as `check` (Material Symbols 0.48 dropped the
  * separate file).
  */
@@ -14,6 +14,9 @@ import arrowForward from '@material-symbols/svg-400/outlined/arrow_forward.svg?r
 import arrowUpward from '@material-symbols/svg-400/outlined/arrow_upward.svg?raw'
 import check from '@material-symbols/svg-400/outlined/check.svg?raw'
 import close from '@material-symbols/svg-400/outlined/close.svg?raw'
+import cloudDone from '@material-symbols/svg-400/outlined/cloud_done.svg?raw'
+import cloudOff from '@material-symbols/svg-400/outlined/cloud_off.svg?raw'
+import cloudSync from '@material-symbols/svg-400/outlined/cloud_sync.svg?raw'
 import deleteIcon from '@material-symbols/svg-400/outlined/delete.svg?raw'
 import dragIndicator from '@material-symbols/svg-400/outlined/drag_indicator.svg?raw'
 import edit from '@material-symbols/svg-400/outlined/edit.svg?raw'
@@ -43,6 +46,9 @@ const SOURCES = {
   arrow_upward: arrowUpward,
   check,
   close,
+  cloud_done: cloudDone,
+  cloud_off: cloudOff,
+  cloud_sync: cloudSync,
   delete: deleteIcon,
   done: check,
   drag_indicator: dragIndicator,

@@ -75,15 +75,15 @@ function browserEnvironment(): DownloadEnvironment {
 }
 
 /**
- * Saves `data` as a download named `timer-app-YYYY-MM-DD.json` (the export's date in this time
- * zone), through an `<a download>` link to a Blob. Returns the file name.
+ * Saves `text` as a JSON download named `name`, through an `<a download>` link to a Blob (Settings
+ * › Data's export, Settings › Account's server copy).
  */
-export function downloadExport(
-  data: exportFormat.ExportData,
+export function saveFile(
+  name: string,
+  text: string,
   environment: DownloadEnvironment = browserEnvironment(),
-): string {
-  const name = exportFormat.exportFileName(data.exportedAt)
-  const blob = new Blob([exportFormat.stringifyExport(data)], { type: 'application/json' })
+): void {
+  const blob = new Blob([text], { type: 'application/json' })
   const url = environment.createObjectURL(blob)
   const link = environment.document.createElement('a')
   link.href = url
@@ -95,5 +95,17 @@ export function downloadExport(
   environment.later(() => {
     environment.revokeObjectURL(url)
   })
+}
+
+/**
+ * Saves `data` as a download named `timer-app-YYYY-MM-DD.json` (the export's date in this time
+ * zone). Returns the file name.
+ */
+export function downloadExport(
+  data: exportFormat.ExportData,
+  environment: DownloadEnvironment = browserEnvironment(),
+): string {
+  const name = exportFormat.exportFileName(data.exportedAt)
+  saveFile(name, exportFormat.stringifyExport(data), environment)
   return name
 }

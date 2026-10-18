@@ -1,0 +1,31 @@
+{
+  "name": "@timer-app/server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "wrangler d1 migrations apply timer-app-auth --local",
+    "migrate:remote": "wrangler d1 migrations apply timer-app-auth --remote",
+    "types": "wrangler types --include-runtime=false --strict-vars=false --env-file .dev.vars.example",
+    "types:check": "wrangler types --include-runtime=false --strict-vars=false --env-file .dev.vars.example --check",
+    "deploy": "wrangler deploy",
+    "auth:schema": "auth generate --config src/auth-schema.ts --output migrations/0001_auth.sql --yes"
+  },
+  "dependencies": {
+    "better-auth": "^1.7.10",
+    "jose": "^6.2.12",
+    "tinybase": "^10.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.4",
+    "@cloudflare/workers-types": "^5.20261016.1",
+    "@types/node": "^24.19.2",
+    "auth": "^1.7.10",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.1"
+  }
+}

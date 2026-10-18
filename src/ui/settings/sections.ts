@@ -1,11 +1,12 @@
 /**
  * The settings dialog's sections (spec › Settings) in display order, their titles and icons, and
- * keyboard movement in the section tab list. Desktop and Account come in later milestones.
+ * keyboard movement in the section tab list. Desktop comes with the desktop milestone.
  */
 import { m } from '../../i18n'
 import type { GlyphName } from './icons'
 
-export type SectionId = 'appearance' | 'behavior' | 'keyboard' | 'presets' | 'data' | 'about'
+export type SectionId =
+  'appearance' | 'behavior' | 'keyboard' | 'presets' | 'data' | 'account' | 'about'
 
 /** Every section, in the order the dialog lists them. Frozen. */
 export const SECTION_IDS: readonly SectionId[] = Object.freeze([
@@ -14,6 +15,7 @@ export const SECTION_IDS: readonly SectionId[] = Object.freeze([
   'keyboard',
   'presets',
   'data',
+  'account',
   'about',
 ])
 
@@ -23,6 +25,7 @@ const TITLES: Readonly<Record<SectionId, () => string>> = {
   keyboard: m.settings_section_keyboard,
   presets: m.settings_section_presets,
   data: m.settings_section_data,
+  account: m.settings_section_account,
   about: m.settings_section_about,
 }
 
@@ -33,6 +36,7 @@ export const SECTION_ICONS: Readonly<Record<SectionId, GlyphName>> = Object.free
   keyboard: 'keyboard',
   presets: 'bookmarks',
   data: 'database',
+  account: 'account_circle',
   about: 'info',
 })
 

@@ -1,14 +1,17 @@
 <!--
   @component
-  The floating action bar at the bottom right (spec › Layout, as in Windows Clock): settings (⚙),
-  edit mode, "+ Timer" (a menu with the default timer and the presets) and "+ Stopwatch". On narrow
-  screens the labels collapse to icons.
+  The floating action bar at the bottom right (spec › Layout, as in Windows Clock): the sync status
+  (a cloud, only while signed in; it opens Settings › Account), settings (⚙), edit mode, "+ Timer"
+  (a menu with the default timer and the presets) and "+ Stopwatch". On narrow screens the labels
+  collapse to icons.
 -->
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity'
 
   import { m } from '../../i18n'
   import { cardStore } from '../../state/cards.svelte'
+  import SyncStatusButton from '../account/SyncStatusButton.svelte'
+  import type { SyncStatus } from '../account/types'
   import { Button, Icon, IconButton } from '../primitives'
   import TimerMenu from './TimerMenu.svelte'
 
@@ -20,9 +23,23 @@
     onopensettings: () => void
     /** Whether the "+ Timer" menu is open. Bindable (the Presets shortcut opens it). */
     menuOpen?: boolean
+    /** The sync status while signed in; null or left out hides the cloud button. */
+    syncStatus?: SyncStatus | null
+    /** Opens Settings › Account (the cloud button). */
+    onopenaccount?: () => void
+    /** The settings button, for giving focus back when what opened Settings is gone. Bindable. */
+    settingsButton?: HTMLButtonElement | undefined
   }
 
-  let { editing, ontoggleedit, onopensettings, menuOpen = $bindable(false) }: Props = $props()
+  let {
+    editing,
+    ontoggleedit,
+    onopensettings,
+    menuOpen = $bindable(false),
+    syncStatus = null,
+    onopenaccount,
+    settingsButton = $bindable(),
+  }: Props = $props()
 
   const narrow = new MediaQuery('max-width: 37.5rem')
   const compact = $derived(narrow.current)
@@ -33,7 +50,15 @@
 {/snippet}
 
 <div class="action-bar" role="group" aria-label={m.action_bar_label()}>
-  <IconButton icon="settings" label={m.action_bar_settings()} onclick={onopensettings} />
+  {#if syncStatus !== null && onopenaccount !== undefined}
+    <SyncStatusButton status={syncStatus} onclick={onopenaccount} />
+  {/if}
+  <IconButton
+    icon="settings"
+    label={m.action_bar_settings()}
+    onclick={onopensettings}
+    bind:element={settingsButton}
+  />
   <IconButton
     icon={editing ? 'done' : 'edit'}
     label={m.action_bar_edit()}

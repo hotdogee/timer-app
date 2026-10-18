@@ -7,7 +7,7 @@ import { cards, type EpochMs } from '../core'
 import type { Preset } from '../state/presets'
 import { DEVICE_STORAGE_KEY, SYNCED_DB_NAME } from './persist'
 import { SCHEMA_VERSION, cardToRow, presetToRow } from './schema'
-import type { SyncedStore } from './stores'
+import { createSyncedStore, type SyncedStore } from './stores'
 import { TAB_CHANNEL } from './tabs'
 
 /** Where the app keeps its data. Tests pass names of their own. */
@@ -50,20 +50,30 @@ export interface FirstRunSeed {
  * Writes the first-run content and then marks the data seeded at `now`, with the current schema
  * version when none is stored: an idle 5:00 timer {@link FIRST_CARD_ID} after any cards already
  * there, and each preset whose id has no row yet, at its list index. One transaction.
+ *
+ * The seed is defaults, stamped older than any change can be: it is written in a scratch store
+ * whose merge clock stands at time 0 and merged in with those stamps. (Turning the app store's own
+ * clock back would not do: its clock never goes back once it has merged anything, loading
+ * included.) So when a fresh device signs in, the account's edits to the first timer and the
+ * presets, deletions included, win over the fresh device's defaults for the same ids, however long
+ * ago they were made; and two fresh devices still agree on one seed, since every stamp also
+ * carries its store's id.
  */
 export function seedFirstRun(store: SyncedStore, seed: FirstRunSeed, now: EpochMs): void {
   const at = Number.isFinite(now) ? now : 0
-  store.transaction(() => {
+  const defaults = createSyncedStore(undefined, () => 0)
+  defaults.transaction(() => {
     if (!store.hasRow('cards', FIRST_CARD_ID)) {
       const card = cards.createTimerCard(FIRST_CARD_ID, seed.cardName, at)
-      store.setRow('cards', FIRST_CARD_ID, cardToRow(card, store.getRowCount('cards')))
+      defaults.setRow('cards', FIRST_CARD_ID, cardToRow(card, store.getRowCount('cards')))
     }
     seed.presets.forEach((preset, index) => {
       if (!store.hasRow('presets', preset.id)) {
-        store.setRow('presets', preset.id, presetToRow(preset, index))
+        defaults.setRow('presets', preset.id, presetToRow(preset, index))
       }
     })
-    if (!store.hasValue('schemaVersion')) store.setValue('schemaVersion', SCHEMA_VERSION)
-    store.setValue('seededAt', at)
+    if (!store.hasValue('schemaVersion')) defaults.setValue('schemaVersion', SCHEMA_VERSION)
+    defaults.setValue('seededAt', at)
   })
+  store.applyMergeableChanges(defaults.getMergeableContent())
 }

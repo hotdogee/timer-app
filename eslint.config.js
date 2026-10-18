@@ -20,6 +20,10 @@ export default defineConfig(
     'src/paraglide/',
     'dev-dist/',
     'project.inlang/cache/',
+    // wrangler's local state, bundles and dry-run output; the generated bindings' types.
+    '**/.wrangler/',
+    '.wrangler-dry/',
+    'server/worker-configuration.d.ts',
   ]),
   js.configs.recommended,
   ts.configs.recommendedTypeChecked,
@@ -52,6 +56,20 @@ export default defineConfig(
   {
     // Root config files and Playwright tests run in Node (e2e/ is typed by e2e/tsconfig.json).
     files: ['*.js', '*.ts', 'e2e/**/*.ts'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
+  {
+    // The Worker runs in workerd (service-worker-style globals; types from server/tsconfig.json).
+    files: ['server/**/*.ts'],
+    languageOptions: {
+      globals: { ...globals.serviceworker },
+    },
+  },
+  {
+    // The server's config files (vitest.config.ts) run in Node.
+    files: ['server/*.ts'],
     languageOptions: {
       globals: { ...globals.node },
     },

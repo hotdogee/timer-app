@@ -11,6 +11,12 @@
  *
  * Methods read the list untracked and write state, so call them from event handlers and effects,
  * never from a template expression or `$derived`.
+ *
+ * One write follows changes from elsewhere: a repair. The built-in presets are seeded as defaults,
+ * older than any change (`seedFirstRun`). When the account deleted one and this device then edited
+ * it (renamed "Tea"), a merge keeps only the edited cells, which alone read as no preset; the
+ * built-in duration is then written back, so the preset stays with this device's edits. Every copy
+ * makes the same repair.
  */
 import { untrack } from 'svelte'
 
@@ -18,7 +24,7 @@ import type { Ms } from '../core'
 import { platform } from '../platform'
 import { presetToRow, presetsFromTable } from '../sync/schema'
 import { appStores, type SyncedStore } from '../sync/stores'
-import { isPresetDuration, presetName, type Preset } from './presets'
+import { BUILTIN_PRESETS, isPresetDuration, presetName, type Preset } from './presets'
 
 /** The presets and the edits on them. Every getter is reactive. */
 export interface PresetStore {
@@ -71,7 +77,19 @@ export function createPresetStore(store: SyncedStore, deps: PresetStoreDeps): Bo
     return next.length === 0 ? NO_PRESETS : Object.freeze(next)
   }
 
+  /** Writes back the duration of built-in presets a merge left without one (see the notes). */
+  function repairBuiltIns(): void {
+    for (const builtIn of BUILTIN_PRESETS) {
+      const row = store.getRow('presets', builtIn.id)
+      if (Object.keys(row).length > 0 && row.duration === undefined) {
+        store.setCell('presets', builtIn.id, 'duration', builtIn.duration)
+      }
+    }
+  }
+
+  repairBuiltIns()
   let presets = $state.raw(read(NO_PRESETS))
+  const repairId = store.addTableListener('presets', repairBuiltIns, true)
   const listenerId = store.addTableListener('presets', () => {
     presets = read(untrack(() => presets))
   })
@@ -148,6 +166,7 @@ export function createPresetStore(store: SyncedStore, deps: PresetStoreDeps): Bo
       })
     },
     destroy() {
+      store.delListener(repairId)
       store.delListener(listenerId)
     },
   }

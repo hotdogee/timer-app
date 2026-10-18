@@ -15,7 +15,6 @@ import { untrack } from 'svelte'
 
 import {
   cards,
-  systemClock,
   type Clock,
   type EpochMs,
   type Ms,
@@ -25,6 +24,7 @@ import {
 import { m } from '../i18n'
 import { platform } from '../platform'
 import { frameClock } from '../ui/frame-clock.svelte'
+import { appClock } from './app-clock'
 
 /** A deleted card and the position it had, kept so the delete can be undone. */
 export interface RemovedCard {
@@ -224,14 +224,14 @@ export function createCardStore(deps: CardStoreDeps): CardStore {
 }
 
 /**
- * The app's card store: ids from the platform, `createdAt` from the system clock, actions timed by
+ * The app's card store: ids from the platform, `createdAt` from the app clock, actions timed by
  * the shared frame clock, and default names in the UI language ("Timer", "計時器", "タイマー"). It
  * starts empty: `startAppData` loads the saved cards into it (and adds the first-run timer on a
  * fresh install).
  */
 export const cardStore: CardStore = createCardStore({
   newId: () => platform.ids.newId(),
-  clock: systemClock,
+  clock: appClock,
   bump: () => {
     frameClock.bump()
     return untrack(() => frameClock.now)

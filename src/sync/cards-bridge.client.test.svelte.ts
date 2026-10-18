@@ -1,8 +1,9 @@
 import { flushSync } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { cards, timer } from '../core'
+import { cards, timer, type TimerState } from '../core'
 import { createCardStore, type CardStore } from '../state/cards.svelte'
+import { FIRST_CARD_ID, seedFirstRun } from './bootstrap'
 import { bindCards, type CardsBridge } from './cards-bridge.svelte'
 import { cardToRow, type CardRow } from './schema'
 import { createSyncedStore, type SyncedStore } from './stores'
@@ -376,5 +377,193 @@ describe('bindCards across two tabs', () => {
     flushSync()
     expect(one.transactions()).toBe(1)
     expect(two.transactions()).toBe(1)
+  })
+})
+
+/** The first card's timer state, when it is a timer. */
+function timerOf(cardStore: CardStore): TimerState | undefined {
+  const card = cardStore.cards[0]
+  return card?.kind === 'timer' ? card.timer : undefined
+}
+
+/**
+ * A device for the cross-device tests: its own synced store whose merge clock is `clock.now`, and
+ * a card store on that clock bound to it (its actions happen at `clock.now`).
+ */
+function device(id: string, clock: { now: number }) {
+  const synced = createSyncedStore(id, () => clock.now)
+  const cardStore = createCardStore({
+    newId: counter(id),
+    clock: () => clock.now,
+    bump: () => clock.now,
+  })
+  let bridge: CardsBridge | null = null
+  const open = (): void => {
+    bridge = bindCards(cardStore, synced)
+    cleanups.push(() => bridge?.stop())
+  }
+  return {
+    synced,
+    cardStore,
+    open,
+    close: () => {
+      bridge?.stop()
+      bridge = null
+    },
+    /** Settles at the clock (as the frame loop does) and writes what changed. */
+    settle: () => {
+      cardStore.settle(clock.now)
+      bridge?.flush()
+    },
+  }
+}
+
+describe('a timer that ended while a device was closed', () => {
+  /**
+   * Devices A and B share a running 3 s timer; B closes; the timer ends; A does `act` (at the
+   * clock, after the end unless it pauses before); B opens later and settles at once, as startup
+   * does; then the two exchange everything.
+   */
+  function scenario(act: (a: ReturnType<typeof device>, id: string) => void, actAt: number) {
+    const clock = { now: NOW }
+    const a = device('a', clock)
+    const b = device('b', clock)
+    a.open()
+    b.open()
+    const id = a.cardStore.addTimer(3_000, 'Tea')
+    a.cardStore.timer(id, timer.start)
+    flushSync()
+    b.synced.merge(a.synced)
+    expect(timerOf(b.cardStore)).toMatchObject({ phase: 'running' })
+    b.close()
+
+    clock.now = NOW + actAt
+    a.settle()
+    act(a, id)
+    flushSync()
+
+    clock.now = NOW + 60_000
+    b.open()
+    b.settle()
+    // B saw the timer end by itself in the meantime.
+    expect(timerOf(b.cardStore)?.phase).toBe('ringing')
+    b.synced.merge(a.synced)
+    flushSync()
+    return { a, b }
+  }
+
+  it('cannot bring back an alarm dismissed elsewhere', () => {
+    const { a, b } = scenario((device, id) => {
+      device.cardStore.timer(id, timer.dismiss)
+    }, 5_000)
+    for (const copy of [a, b]) {
+      expect(timerOf(copy.cardStore)).toEqual({ phase: 'idle', duration: 3_000 })
+      expect(copy.synced.getCell('cards', copy.cardStore.cards[0]?.id ?? '', 'phase')).toBe('idle')
+    }
+  })
+
+  it('cannot undo a pause made elsewhere before the end', () => {
+    const { a, b } = scenario((device, id) => {
+      device.cardStore.timer(id, timer.pause)
+    }, 1_000)
+    for (const copy of [a, b]) {
+      expect(timerOf(copy.cardStore)).toEqual({
+        phase: 'paused',
+        duration: 3_000,
+        remaining: 2_000,
+      })
+    }
+  })
+
+  it('cannot undo a reset made elsewhere', () => {
+    const { a, b } = scenario((device, id) => {
+      device.cardStore.timer(id, timer.reset)
+    }, 5_000)
+    expect(timerOf(a.cardStore)?.phase).toBe('idle')
+    expect(timerOf(b.cardStore)?.phase).toBe('idle')
+  })
+
+  it('rings on both when nobody acted, and both write the same settle', () => {
+    const { a, b } = scenario(() => undefined, 5_000)
+    for (const copy of [a, b]) {
+      expect(timerOf(copy.cardStore)).toEqual({
+        phase: 'ringing',
+        duration: 3_000,
+        endedAt: NOW + 3_000,
+      })
+    }
+    // The settles carry the same stamps, so the copies agree without another round.
+    expect(b.synced.getMergeableContentHashes()).toEqual(a.synced.getMergeableContentHashes())
+  })
+
+  it('still lets an action made after the end win, from any device', () => {
+    const { a, b } = scenario(() => undefined, 5_000)
+    const id = b.cardStore.cards[0]?.id ?? ''
+    b.cardStore.timer(id, timer.restart)
+    flushSync()
+    a.synced.merge(b.synced)
+    flushSync()
+    expect(timerOf(a.cardStore)).toEqual({
+      phase: 'running',
+      duration: 3_000,
+      endsAt: NOW + 63_000,
+    })
+  })
+})
+
+describe('the first-run timer after the account deleted it', () => {
+  it('stays with the edits a fresh device made to it before signing in', () => {
+    const clock = { now: NOW }
+    // The account: it seeded, then deleted the first-run timer.
+    const account = device('account', clock)
+    seedFirstRun(account.synced, { cardName: 'Timer', presets: [] }, clock.now)
+    account.open()
+    clock.now += 60_000
+    account.cardStore.remove(FIRST_CARD_ID)
+    flushSync()
+    expect(account.synced.hasRow('cards', FIRST_CARD_ID)).toBe(false)
+
+    // A day later a fresh device seeds, renames and starts its first-run timer, then signs in.
+    clock.now += 86_400_000
+    const fresh = device('fresh', clock)
+    fresh.synced.applyMergeableChanges(createSyncedStore().getMergeableContent())
+    seedFirstRun(fresh.synced, { cardName: 'Timer', presets: [] }, clock.now)
+    fresh.open()
+    fresh.cardStore.rename(FIRST_CARD_ID, 'Laundry')
+    fresh.cardStore.timer(FIRST_CARD_ID, timer.start)
+    flushSync()
+    fresh.synced.merge(account.synced)
+    flushSync()
+    account.synced.merge(fresh.synced)
+    flushSync()
+
+    for (const copy of [fresh, account]) {
+      expect(copy.cardStore.cards.map((card) => card.name)).toEqual(['Laundry'])
+      expect(timerOf(copy.cardStore)).toMatchObject({ phase: 'running', duration: 300_000 })
+      expect(copy.synced.getCell('cards', FIRST_CARD_ID, 'kind')).toBe('timer')
+    }
+    expect(fresh.synced.getMergeableContentHashes()).toEqual(
+      account.synced.getMergeableContentHashes(),
+    )
+  })
+
+  it('is gone everywhere when the fresh device left it untouched', () => {
+    const clock = { now: NOW }
+    const account = device('account', clock)
+    seedFirstRun(account.synced, { cardName: 'Timer', presets: [] }, clock.now)
+    account.open()
+    clock.now += 60_000
+    account.cardStore.remove(FIRST_CARD_ID)
+    flushSync()
+
+    clock.now += 86_400_000
+    const fresh = device('fresh', clock)
+    fresh.synced.applyMergeableChanges(createSyncedStore().getMergeableContent())
+    seedFirstRun(fresh.synced, { cardName: 'Timer', presets: [] }, clock.now)
+    fresh.open()
+    fresh.synced.merge(account.synced)
+    flushSync()
+    expect(fresh.cardStore.cards).toEqual([])
+    expect(fresh.synced.getRow('cards', FIRST_CARD_ID)).toEqual({})
   })
 })

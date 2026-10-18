@@ -1,0 +1,25 @@
+{
+  // The Worker, its tests and its Vitest config. Runtime types come from @cloudflare/workers-types
+  // (the latest compatibility date); the bindings (`Env`) from worker-configuration.d.ts, which
+  // `pnpm server:types` regenerates after a change to wrangler.jsonc. Node types are included
+  // because the Worker runs with `nodejs_compat` and the Vitest config runs in Node.
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "*.ts", "worker-configuration.d.ts"]
+}

@@ -13,6 +13,7 @@ import {
   type Store,
 } from 'tinybase/with-schemas'
 
+import { appClock } from '../state/app-clock'
 import {
   DEVICE_TABLES_SCHEMA,
   DEVICE_VALUES_SCHEMA,
@@ -36,9 +37,13 @@ export interface AppStores {
 
 /**
  * Creates an empty synced store. `uniqueId` names this copy in the merge clocks (random by
- * default); `getNow` replaces the clock they read (tests).
+ * default). `getNow` is the time those clocks start each change's stamp from: app time by default,
+ * the device clock corrected to the server's while signed in, so changes from devices whose clocks
+ * are wrong still order right (and TinyBase, which ignores changes stamped more than five minutes
+ * ahead of its own clock, keeps accepting the others' changes on a slow device). Tests pass their
+ * own.
  */
-export function createSyncedStore(uniqueId?: string, getNow?: GetNow): SyncedStore {
+export function createSyncedStore(uniqueId?: string, getNow: GetNow = appClock): SyncedStore {
   return createMergeableStore(uniqueId, getNow)
     .setTablesSchema(SYNCED_TABLES_SCHEMA)
     .setValuesSchema(SYNCED_VALUES_SCHEMA)

@@ -11,34 +11,101 @@
  *
  * Every test starts in a fresh browser context, so its storage is empty: the app opens on its
  * first run (one 5:00 timer and the built-in presets). Pages of one context share their storage
- * and stay in step like tabs.
+ * and stay in step like tabs. `openDevice` opens another context: another device, with storage
+ * of its own.
+ *
+ * The sync server (`wrangler dev`, see playwright.config.ts) is shared by every test. Each browser
+ * context sends a client IP of its own (`CF-Connecting-IP`), so the server's per-IP rate limits
+ * (three code emails a minute, for one) apply to each test separately, as to separate people.
  */
-import { expect, test as base, type Locator, type Page } from '@playwright/test'
+import {
+  expect,
+  test as base,
+  type BrowserContext,
+  type Locator,
+  type Page,
+} from '@playwright/test'
+
+/** Contexts opened by this worker process so far, for {@link clientIp}. */
+let contextsOpened = 0
+
+/**
+ * A client IP address no other context of the run uses: `10.<worker>.<n>.<n>`. Worker indexes
+ * are unique within a run, and so is the count within a worker.
+ */
+function clientIp(workerIndex: number): string {
+  const n = contextsOpened++
+  return `10.${String(workerIndex % 256)}.${String(Math.floor(n / 256) % 256)}.${String(n % 256)}`
+}
+
+interface Fixtures {
+  /**
+   * Console errors the test expects, such as the browser's "Failed to load resource" for a
+   * request the test makes fail on purpose (a wrong code, going offline). Push patterns to it.
+   */
+  allowedErrors: RegExp[]
+  /** Console errors and uncaught exceptions of every page of the test (see `test`). */
+  pageErrors: string[]
+  /**
+   * Opens a page in a new browser context: another device, with its own storage, cookies and
+   * client IP, and the project's options (base URL, locale). Its pages are watched for errors
+   * like the test's own, and it closes when the test ends.
+   */
+  openDevice: () => Promise<Page>
+}
 
 /**
  * Playwright's `test`, failing any test whose pages log a console error or throw an uncaught
  * exception: those are bugs even when the flow under test still works. It watches every page of
- * the test's context, including ones the test opens itself.
+ * the test's contexts, including ones the test opens itself. Errors the test expects are listed
+ * in `allowedErrors`.
  */
-export const test = base.extend<{ pageErrors: string[] }>({
+export const test = base.extend<Fixtures & { watchContext: (context: BrowserContext) => void }>({
+  extraHTTPHeaders: async ({ extraHTTPHeaders }, use, testInfo) => {
+    await use({ ...extraHTTPHeaders, 'CF-Connecting-IP': clientIp(testInfo.workerIndex) })
+  },
+  // eslint-disable-next-line no-empty-pattern -- Playwright reads a fixture's needs from this pattern
+  allowedErrors: async ({}, use) => {
+    await use([])
+  },
+  watchContext: async ({ allowedErrors }, use) => {
+    const errors: string[] = []
+    const record = (error: string): void => {
+      if (!allowedErrors.some((pattern) => pattern.test(error))) errors.push(error)
+    }
+    const watchPage = (watched: Page): void => {
+      watched.on('console', (message) => {
+        if (message.type() === 'error') record(`console.error: ${message.text()}`)
+      })
+      watched.on('pageerror', (error) => {
+        record(`uncaught: ${error.message}`)
+      })
+    }
+    await use((context) => {
+      for (const page of context.pages()) watchPage(page)
+      context.on('page', watchPage)
+    })
+    expect(errors, 'errors in the page').toEqual([])
+  },
   pageErrors: [
-    async ({ context, page }, use) => {
-      const errors: string[] = []
-      const watch = (watched: Page): void => {
-        watched.on('console', (message) => {
-          if (message.type() === 'error') errors.push(`console.error: ${message.text()}`)
-        })
-        watched.on('pageerror', (error) => {
-          errors.push(`uncaught: ${error.message}`)
-        })
-      }
-      watch(page)
-      context.on('page', watch)
-      await use(errors)
-      expect(errors, 'errors in the page').toEqual([])
+    async ({ context, watchContext }, use) => {
+      watchContext(context)
+      await use([])
     },
     { auto: true },
   ],
+  openDevice: async ({ browser, watchContext }, use, testInfo) => {
+    const contexts: BrowserContext[] = []
+    await use(async () => {
+      const context = await browser.newContext({
+        extraHTTPHeaders: { 'CF-Connecting-IP': clientIp(testInfo.workerIndex) },
+      })
+      contexts.push(context)
+      watchContext(context)
+      return context.newPage()
+    })
+    await Promise.all(contexts.map((context) => context.close()))
+  },
 })
 
 export { expect }

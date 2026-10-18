@@ -1,7 +1,7 @@
 <!--
   @component
   Settings › About: the app's name and icon, its version, the platform it runs on, a link to the
-  source code and the license.
+  source code, the license and the privacy policy.
 
   ```svelte
   <AboutSection version={__APP_VERSION__} platformKind="web" />
@@ -10,6 +10,7 @@
 <script lang="ts">
   import { m } from '../../i18n'
   import type { PlatformKind } from '../../platform'
+  import { PRIVACY_POLICY_URL } from '../account/privacy'
   import Glyph from './Glyph.svelte'
   import SectionHeader from './SectionHeader.svelte'
 
@@ -55,6 +56,13 @@
 </dl>
 
 <p class="license">{m.about_license()}</p>
+
+<p class="privacy">
+  <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
+    {m.about_privacy()}
+    <span class="external"><Glyph name="open_in_new" /></span>
+  </a>
+</p>
 
 <style>
   .app {
@@ -133,8 +141,14 @@
     font-size: 1rem;
   }
 
+  /* The same size as the link above it and as Account's link to the same policy. */
+  .privacy {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
   .license {
-    padding-block: var(--space-3);
+    padding-block: var(--space-3) var(--space-1);
     color: var(--md-sys-color-on-surface-variant);
     font-size: 0.875rem;
     line-height: 1.25rem;

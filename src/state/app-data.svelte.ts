@@ -80,6 +80,8 @@ export interface AppDataOptions {
 
 /** The loaded app data. */
 export interface AppData {
+  /** The loaded stores; the sync-server connection (`createRemoteSync`) runs on `stores.synced`. */
+  readonly stores: AppStores
   readonly settingsStore: SettingsStore
   readonly presetStore: PresetStore
   readonly cardStore: CardStore
@@ -136,6 +138,7 @@ export async function startAppData(options: AppDataOptions): Promise<AppData> {
   bridge.flush()
 
   return {
+    stores,
     settingsStore,
     presetStore,
     cardStore,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { seedFirstRun } from '../sync/bootstrap'
 import { presetToRow } from '../sync/schema'
 import { appStores, createSyncedStore, type SyncedStore } from '../sync/stores'
 import { BUILTIN_PRESETS } from './presets'
@@ -175,6 +176,55 @@ describe('createPresetStore', () => {
     store.destroy()
     synced.delTable('presets')
     expect(store.presets).toHaveLength(4)
+  })
+})
+
+describe('built-in presets after the account deleted them', () => {
+  it('stay with the edits a fresh device made to them before signing in', () => {
+    let now = Date.UTC(2026, 9, 18, 9, 0, 0)
+    const clock = () => now
+    // The account seeded the built-ins, then deleted Tea.
+    const account = createSyncedStore('account', clock)
+    seedFirstRun(account, { cardName: 'Timer', presets: BUILTIN_PRESETS }, now)
+    const accountPresets = setup(account).store
+    now += MINUTE
+    accountPresets.remove('tea')
+
+    // A day later a fresh device seeds them, renames Tea and signs in.
+    now += 24 * 60 * MINUTE
+    const fresh = createSyncedStore('fresh', clock)
+    fresh.applyMergeableChanges(createSyncedStore().getMergeableContent())
+    seedFirstRun(fresh, { cardName: 'Timer', presets: BUILTIN_PRESETS }, now)
+    const freshPresets = setup(fresh).store
+    freshPresets.rename('tea', 'Green tea')
+    fresh.merge(account)
+    account.merge(fresh)
+
+    for (const store of [freshPresets, accountPresets]) {
+      expect(store.presets.find((preset) => preset.id === 'tea')).toEqual({
+        id: 'tea',
+        name: 'Green tea',
+        duration: 3 * MINUTE,
+      })
+    }
+    expect(fresh.getMergeableContentHashes()).toEqual(account.getMergeableContentHashes())
+  })
+
+  it('stay deleted when the fresh device left them alone', () => {
+    let now = Date.UTC(2026, 9, 18, 9, 0, 0)
+    const clock = () => now
+    const account = createSyncedStore('account', clock)
+    seedFirstRun(account, { cardName: 'Timer', presets: BUILTIN_PRESETS }, now)
+    now += MINUTE
+    account.delRow('presets', 'tea')
+    now += 24 * 60 * MINUTE
+    const fresh = createSyncedStore('fresh', clock)
+    fresh.applyMergeableChanges(createSyncedStore().getMergeableContent())
+    seedFirstRun(fresh, { cardName: 'Timer', presets: BUILTIN_PRESETS }, now)
+    const { store } = setup(fresh)
+    fresh.merge(account)
+    expect(store.presets.map((preset) => preset.id)).toEqual(['pomodoro', 'break', 'eggs'])
+    expect(fresh.getRow('presets', 'tea')).toEqual({})
   })
 })
 

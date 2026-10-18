@@ -1,3 +1,5 @@
+import { Agent } from 'node:http'
+
 import { paraglideVitePlugin } from '@inlang/paraglide-js'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vite'
@@ -16,6 +18,23 @@ const browserTargets = ['chrome105', 'edge105', 'firefox110', 'safari16']
  * (`pnpm i18n:compile`), and each Vitest project would otherwise recompile into the same folder.
  */
 const vitest = process.env.VITEST !== undefined
+/**
+ * The sync server (`pnpm server:dev`, wrangler dev on port 8787). The dev and preview servers
+ * forward the API, the auth routes, the sync WebSocket and the dev-only endpoints to it, so the
+ * browser sees one origin: no CORS, and the session cookie is first-party. 127.0.0.1 rather than
+ * localhost, because wrangler listens on IPv4 only and localhost may resolve to ::1 first.
+ */
+const apiTarget = 'http://127.0.0.1:8787'
+/**
+ * Reuses connections to wrangler. Without an agent the proxy opens a new connection for every
+ * request and closes it, and under load (the end-to-end tests) Windows runs out of local ports
+ * for new connections (`connect EADDRINUSE`).
+ */
+const apiAgent = new Agent({ keepAlive: true })
+const apiProxy = {
+  '/api': { target: apiTarget, ws: true, agent: apiAgent },
+  '/__dev': { target: apiTarget, agent: apiAgent },
+}
 
 // Tauri-friendly settings follow https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
@@ -66,6 +85,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
+        // Navigations to the server (an OAuth callback, a download from /api/export) must reach
+        // the network, not the app shell.
+        navigateFallbackDenylist: [/^\/api\//, /^\/__dev\//],
       },
       devOptions: { enabled: false },
     }),
@@ -82,8 +104,11 @@ export default defineConfig({
     strictPort: true,
     host: tauriDevHost ?? false,
     ...(tauriDevHost ? { hmr: { protocol: 'ws', host: tauriDevHost, port: 5174 } } : {}),
-    watch: { ignored: ['**/src-tauri/**'] },
+    // wrangler dev writes its local D1 and Durable Object state under server/.wrangler.
+    watch: { ignored: ['**/src-tauri/**', '**/.wrangler/**'] },
+    proxy: apiProxy,
   },
+  preview: { proxy: apiProxy },
   envPrefix: ['VITE_', 'TAURI_ENV_*'],
   ssr: {
     // material-color-utilities 0.4.0 ships ESM with extensionless relative imports, which Node's

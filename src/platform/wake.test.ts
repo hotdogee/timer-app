@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setClockOffset } from '../state/app-clock'
 import {
   createWebWakeScheduler,
   type VisibilityLike,
@@ -375,5 +376,67 @@ describe('createWebWakeScheduler visibility', () => {
     vi.advanceTimersByTime(1000)
     expect(onFire).toHaveBeenCalledTimes(1)
     scheduler.dispose()
+  })
+})
+
+describe('createWebWakeScheduler on the app clock', () => {
+  afterEach(() => {
+    setClockOffset(0)
+  })
+
+  it('takes deadlines in app time by default and converts them for the worker', () => {
+    setClockOffset(5000)
+    const { scheduler, worker } = setup()
+    const onFire = vi.fn()
+    scheduler.schedule(BASE + 5000 + 1000, onFire)
+    expect(worker().posted).toEqual([{ at: BASE + 1000 }])
+    vi.setSystemTime(BASE + 1000)
+    worker().fire()
+    expect(onFire).toHaveBeenCalledTimes(1)
+  })
+
+  it('posts the pending deadline again when the offset changes, so it fires on time', () => {
+    const { scheduler, worker } = setup()
+    const onFire = vi.fn()
+    scheduler.schedule(BASE + 10_000, onFire)
+    // The server says the device is 4 s behind: the same app-time deadline is 4 s sooner.
+    setClockOffset(4000)
+    expect(worker().posted).toEqual([{ at: BASE + 10_000 }, { at: BASE + 6000 }])
+    vi.setSystemTime(BASE + 6000)
+    worker().fire()
+    expect(onFire).toHaveBeenCalledTimes(1)
+    // Nothing pending: an offset change posts nothing.
+    setClockOffset(0)
+    expect(worker().posted).toHaveLength(2)
+  })
+
+  it('re-arms the main-thread fallback when the offset changes', () => {
+    const { scheduler } = setup({ createWorker: null })
+    const onFire = vi.fn()
+    scheduler.schedule(BASE + 10_000, onFire)
+    setClockOffset(-3000)
+    vi.advanceTimersByTime(12_999)
+    expect(onFire).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(onFire).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops following the offset when disposed, and can be told to ignore it', () => {
+    const disposed = setup()
+    disposed.scheduler.schedule(BASE + 10_000, vi.fn())
+    disposed.scheduler.dispose()
+    setClockOffset(2000)
+    expect(disposed.worker().posted).toEqual([{ at: BASE + 10_000 }])
+
+    const subscribe = vi.fn(() => () => undefined)
+    const custom = setup({ clockChanges: subscribe })
+    custom.scheduler.schedule(BASE + 1000, vi.fn())
+    custom.scheduler.schedule(BASE + 2000, vi.fn())
+    expect(subscribe).toHaveBeenCalledTimes(1)
+
+    const ignoring = setup({ clockChanges: null })
+    ignoring.scheduler.schedule(BASE + 10_000, vi.fn())
+    setClockOffset(7000)
+    expect(ignoring.worker().posted).toEqual([{ at: BASE + 10_000 - 2000 }])
   })
 })

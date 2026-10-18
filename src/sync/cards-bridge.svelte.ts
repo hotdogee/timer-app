@@ -7,17 +7,23 @@
  *   check), the position of every card whose index changed, and deletes the rows of removed cards.
  *   A card is written as the cells that differ from what the table last held for it, so a rename
  *   and a start made on two devices merge instead of one clobbering the other.
+ * - A timer reaching its end (running → ringing, the card store's settle) is not an action: every
+ *   device makes the same change by itself. Its cells are written with a stamp just after the
+ *   running state's (`stamps.ts`), never with the current time, so a device that opens after the
+ *   timer ended cannot undo a dismiss, pause or reset made meanwhile on another device.
  * - Table → store: a table listener rebuilds the list (sorted by position, then `createdAt`, then
  *   id) and hands it to the card store, keeping the selection when its card still exists. A card
  *   that reads back the same as the store's keeps its object, and a list that reads back the same
  *   is not handed over at all.
  *
  * No echo: the listener skips the bridge's own transactions, and every card it hands over is
- * recorded as what the table holds, so the effect that follows finds nothing to write. The one
- * write a change from elsewhere can cause is a repair: when a merge leaves positions with gaps or
- * ties (two devices added a card at the same place while apart), the cards whose stored position
- * is not their index get it rewritten. Every copy computes the same repair, so it converges in one
- * round. Changes from other tabs, from storage and (in M4) from the sync server all arrive the
+ * recorded as what the table holds, so the effect that follows finds nothing to write. The writes
+ * a change from elsewhere can cause are repairs, which every copy computes alike, so they converge
+ * in one round: when a merge leaves positions with gaps or ties (two devices added a card at the
+ * same place while apart), the cards whose stored position is not their index get it rewritten;
+ * and when it leaves the first-run timer's row without its kind (the account deleted that card
+ * after this device's seed, but this device then used it, so its own later edits survive the
+ * delete), the kind is written back, so the card stays with those edits instead of vanishing. Changes from other tabs, from storage and (in M4) from the sync server all arrive the
  * same way, as table changes. Undo of a delete (`lastRemoved`) stays in the card store's memory: a
  * restored card is written again as a new row.
  *
@@ -29,8 +35,10 @@
  */
 import { untrack } from 'svelte'
 
-import type { cards } from '../core'
+import { timer, type cards } from '../core'
+import { FIRST_CARD_ID } from './bootstrap'
 import { cardToRow, cardsFromTable, sameCard, type CardRow } from './schema'
+import { cellStamps, latestStamp, nextStamp, writeStamped, type StampedCell } from './stamps'
 import type { SyncedStore } from './stores'
 
 /** What the bridge needs from the card store (`state/cards.svelte.ts` fits). */
@@ -58,6 +66,36 @@ interface Held {
   readonly position: number
 }
 
+/** The cells a card's timer or stopwatch state lives in (all but kind, name, createdAt, muted). */
+const STATE_CELLS: ReadonlySet<string> = new Set<keyof CardRow>([
+  'phase',
+  'duration',
+  'endsAt',
+  'remaining',
+  'endedAt',
+  'startedAt',
+  'accumulated',
+  'laps',
+])
+
+/**
+ * Whether `after` is `before`'s timer reaching its end and nothing else about its state changed:
+ * running until `endsAt`, now ringing from `endsAt` with the same duration (`timer.settle`).
+ */
+export function isSettle(before: cards.Card, after: cards.Card): boolean {
+  if (before.kind !== 'timer' || after.kind !== 'timer') return false
+  const ran = before.timer
+  if (ran.phase !== 'running') return false
+  const settled = timer.settle(ran, ran.endsAt)
+  const rang = after.timer
+  return (
+    settled.phase === 'ringing' &&
+    rang.phase === 'ringing' &&
+    rang.endedAt === settled.endedAt &&
+    rang.duration === settled.duration
+  )
+}
+
 /**
  * The selection to keep after the list changed under it: the same card when it is still there,
  * else the card that took its place (as a local delete does), else nothing.
@@ -83,7 +121,8 @@ export function bindCards(cardStore: BridgedCardStore, store: SyncedStore): Card
 
   /**
    * Writes `card`, at `index`, as the cells that differ from what the table last held for it
-   * (`known`), or as a whole new row when the table held none.
+   * (`known`), or as a whole new row when the table held none. When its state only reached its
+   * end ({@link isSettle}), the state cells go in with the stamp after the running state's.
    */
   function writeCard(card: cards.Card, index: number, known: Held | undefined): void {
     const next = cardToRow(card, index)
@@ -92,14 +131,40 @@ export function bindCards(cardStore: BridgedCardStore, store: SyncedStore): Card
       return
     }
     const previous = cardToRow(known.card, known.position)
+    const settle = isSettle(known.card, card)
+    const settled: Record<string, StampedCell> = {}
     for (const cell of Object.keys(next) as (keyof CardRow)[]) {
       const value = next[cell]
-      if (value !== undefined && !Object.is(value, previous[cell])) {
-        store.setCell('cards', card.id, cell, value)
-      }
+      if (value === undefined || Object.is(value, previous[cell])) continue
+      if (settle && STATE_CELLS.has(cell)) settled[cell] = value
+      else store.setCell('cards', card.id, cell, value)
     }
     for (const cell of Object.keys(previous) as (keyof CardRow)[]) {
-      if (!Object.hasOwn(next, cell)) store.delCell('cards', card.id, cell)
+      if (Object.hasOwn(next, cell)) continue
+      if (settle && STATE_CELLS.has(cell)) settled[cell] = null
+      else store.delCell('cards', card.id, cell)
+    }
+    if (Object.keys(settled).length === 0) return
+    const stamps = cellStamps(store, 'cards', card.id)
+    const running = latestStamp(
+      [...stamps].filter(([cell]) => STATE_CELLS.has(cell)).map(([, hlc]) => hlc),
+    )
+    writeStamped(store, 'cards', card.id, settled, nextStamp(running))
+  }
+
+  /**
+   * Writes the first-run timer's kind back when a merge left its row with cells but without the
+   * kind (see the module notes), so it reads as the card this device's edits made it. Only from
+   * a mutator listener or outside any listener.
+   */
+  function repairFirstCard(): void {
+    const row = store.getRow('cards', FIRST_CARD_ID)
+    if (Object.keys(row).length === 0 || row.kind !== undefined) return
+    writing = true
+    try {
+      store.setCell('cards', FIRST_CARD_ID, 'kind', 'timer')
+    } finally {
+      writing = false
     }
   }
 
@@ -147,7 +212,10 @@ export function bindCards(cardStore: BridgedCardStore, store: SyncedStore): Card
    */
   function read(writePending: boolean): void {
     if (writing || stopped) return
-    if (writePending) write(untrack(() => cardStore.list))
+    if (writePending) {
+      write(untrack(() => cardStore.list))
+      repairFirstCard()
+    }
     const before = untrack(() => cardStore.list)
     // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local, never read reactively
     const mine = new Map(before.cards.map((card) => [card.id, card]))
@@ -167,6 +235,7 @@ export function bindCards(cardStore: BridgedCardStore, store: SyncedStore): Card
     cardStore.replace({ cards: next, selectedId: keptSelection(before, next) })
   }
 
+  repairFirstCard()
   read(false)
   const listenerId = store.addTableListener(
     'cards',
