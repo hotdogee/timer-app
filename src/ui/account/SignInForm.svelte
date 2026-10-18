@@ -5,7 +5,8 @@
   email by the browser where it can), "Sign in", "Use another email" and "Send a new code"; and on
   the first step one "Continue with …" button per OAuth provider the server has, which leave the
   page for the provider and come back signed in (or with the auth state's `oauth` error, which
-  shows under them).
+  shows under them). The desktop app hides the provider buttons (`providers={false}`): providers
+  refuse to sign in inside an embedded webview, so it signs in through the browser instead.
 
   A full code signs in by itself, once per code, and the text the code field is described by says
   so (with where the code went and when it expires); Enter works on both steps. Each step's field
@@ -43,9 +44,11 @@
     autofocus?: boolean
     /** Runs once the code was accepted. */
     onsignedin?: () => void
+    /** Whether to offer the OAuth providers the server has (not on desktop). */
+    providers?: boolean
   }
 
-  let { auth, autofocus = false, onsignedin }: Props = $props()
+  let { auth, autofocus = false, onsignedin, providers = true }: Props = $props()
 
   /** What is waiting on the server: sending a code, a new code, signing in, or a provider. */
   type Pending = 'send' | 'resend' | 'verify' | Provider | null
@@ -261,7 +264,7 @@
         />
       </div>
     </form>
-    {#if auth.providers.length > 0}
+    {#if providers && auth.providers.length > 0}
       <div class="divider"><span>{m.account_or()}</span></div>
       <div class="providers">
         {#each auth.providers as provider (provider)}

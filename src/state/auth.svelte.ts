@@ -15,14 +15,30 @@
  * {@link AuthError}); they never reject. `signInWith` leaves the page for the provider, which
  * returns to the same URL; when the provider reports a failure, `error` is `oauth` after `start`.
  *
- * The desktop app (M5) has no cookie: it will pass a bearer token through `tokenProvider`.
+ * The desktop app has no cookie (the API is on another origin): it signs in through the browser
+ * with the device authorization flow (`startDeviceSignIn`: a code to approve on the `/device`
+ * page, then polling for the token, RFC 8628) or with an emailed code, keeps the session token in
+ * the device store (`settingsStore.auth`, through {@link TokenStore}) and sends it as a bearer
+ * token with every request (`tokenProvider`; {@link bearerToken} for the sync socket). Signing
+ * out, deleting the account, or the server no longer knowing the token removes it.
  */
 import { createAuthClient } from 'better-auth/client'
 import { deviceAuthorizationClient, emailOTPClient } from 'better-auth/client/plugins'
 import { untrack } from 'svelte'
 
+import type { Clock, EpochMs, settings } from '../core'
+import { platform } from '../platform'
 import { apiOrigin, apiUrl } from '../sync/api'
-import { API_PATHS, PROVIDERS, type AppEnv, type Provider } from '../sync/protocol'
+import {
+  API_PATHS,
+  DESKTOP_CLIENT_ID,
+  DEVICE_USER_CODE_PARAM,
+  DEVICE_VERIFICATION_PATH,
+  PROVIDERS,
+  type AppEnv,
+  type Provider,
+} from '../sync/protocol'
+import { settingsStore } from './settings.svelte'
 
 /** Whether someone is signed in; `unknown` until the server first answers (or a saved account). */
 export type AuthStatus = 'unknown' | 'signed-out' | 'signed-in'
@@ -63,6 +79,27 @@ export type AuthError =
   | 'network'
   | 'unknown'
 
+/**
+ * The desktop sign-in through the browser (device authorization), while it runs or once it ended
+ * without signing in: asking for a code; waiting for the code to be approved on the `/device`
+ * page (`retrying` while the server cannot be reached); or refused there, or expired unapproved.
+ */
+export type DeviceSignIn =
+  | { readonly phase: 'requesting' }
+  | {
+      readonly phase: 'waiting'
+      /** The code to show, as the server gave it (`ABCDEFGH`). */
+      readonly userCode: string
+      /** The approval page with the code filled in (`https://…/device?user_code=…`). */
+      readonly verificationUrl: string
+      /** When the code expires (device clock). */
+      readonly expiresAt: EpochMs
+      /** The last poll could not reach the server; polling goes on. */
+      readonly retrying: boolean
+    }
+  | { readonly phase: 'denied' }
+  | { readonly phase: 'expired' }
+
 /** The auth state and actions. Every getter is reactive. */
 export interface AuthStore {
   readonly status: AuthStatus
@@ -94,13 +131,88 @@ export interface AuthStore {
   verifyCode(email: string, code: string): Promise<boolean>
   /** Leaves for the provider's sign-in page; it returns to the current URL. */
   signInWith(provider: Provider): Promise<boolean>
-  /** Signs out on the server; the local data stays. */
-  signOut(): Promise<boolean>
+  /**
+   * Signs out on the server; the local data stays. Resolves to true once signed out, or to false
+   * (with `error`) when the server could not be told, which keeps the session. A client with a
+   * bearer token (the desktop app) signs out on this device even then: it forgets its token and
+   * resolves to `'device-only'`, and the server's session ends when it expires.
+   */
+  signOut(): Promise<boolean | 'device-only'>
   /** Deletes the account and the server's copy of the data; the local data stays. */
   deleteAccount(): Promise<boolean>
   /** Forgets `error`. */
   clearError(): void
+  /** The desktop sign-in through the browser; null when none runs (or it signed in). */
+  readonly device: DeviceSignIn | null
+  /**
+   * Starts the desktop sign-in through the browser (any earlier one stops): asks the server for a
+   * code, then polls at the interval the server asks for (slowing down when told to) until the
+   * code is approved, refused or expires, or {@link cancelDeviceSignIn}. Once approved, the token
+   * is stored and the session checked, so `status` becomes `signed-in`. Resolves to whether a code
+   * came (`device` is then `waiting`); otherwise `error` says why. Needs a token store (desktop).
+   */
+  startDeviceSignIn(): Promise<boolean>
+  /** Stops the desktop sign-in, or forgets how it ended (`device` becomes null). */
+  cancelDeviceSignIn(): void
 }
+
+/**
+ * Where a client without the session cookie (the desktop app) keeps its bearer token: the device
+ * store's `auth` group in the app. The token may have expired; see {@link usableToken}.
+ */
+export interface TokenStore {
+  readonly current: settings.DeviceAuth | null
+  /** Stores a token, or removes it (null). */
+  set(auth: settings.DeviceAuth | null): void
+}
+
+/** A stored token's text while it has not expired at `now`, else null. */
+export function usableToken(auth: settings.DeviceAuth | null, now: EpochMs): string | null {
+  return auth !== null && auth.expiresAt > now ? auth.token : null
+}
+
+/**
+ * How long a token from an emailed-code sign-in is taken to last until the session check reports
+ * its real expiry: the server's session lifetime (30 days).
+ */
+export const DEFAULT_SESSION_MS = 30 * 24 * 60 * 60 * 1000
+
+/**
+ * How long after a sign-in a "signed out" answer does not remove the new token: a session check
+ * that was already under way (the window got the focus back) went without it.
+ */
+export const TOKEN_GRACE_MS = 30_000
+
+/** A successful sign-in: the user, when the answer named one, and the session token it carried. */
+export interface SignIn {
+  readonly user: AccountUser | null
+  /** The session token (for a bearer client), or null when the answer had none. */
+  readonly token: string | null
+}
+
+/** A device code the server issued for the desktop sign-in (RFC 8628 § 3.2). */
+export interface DeviceCode {
+  /** The secret the app polls with; never shown. */
+  readonly deviceCode: string
+  /** The code the user compares on the approval page. */
+  readonly userCode: string
+  /** The approval page with the code filled in. */
+  readonly verificationUrl: string
+  /** Seconds until the codes expire. */
+  readonly expiresIn: number
+  /** Seconds to wait between polls. */
+  readonly interval: number
+}
+
+/** What one poll for the device code's token found (RFC 8628 § 3.5). */
+export type DevicePoll =
+  | { readonly kind: 'pending' }
+  /** Polling too often: wait 5 seconds longer from now on. */
+  | { readonly kind: 'slow-down' }
+  | { readonly kind: 'denied' }
+  | { readonly kind: 'expired' }
+  | { readonly kind: 'granted'; readonly token: string; readonly expiresIn: number }
+  | { readonly kind: 'failed'; readonly error: AuthError }
 
 /** How a backend request ended. */
 export type AuthResult<T = undefined> =
@@ -109,7 +221,8 @@ export type AuthResult<T = undefined> =
 /** What a session check found. */
 export type SessionReport =
   | { readonly kind: 'pending' }
-  | { readonly kind: 'signed-in'; readonly user: AccountUser }
+  /** `expiresAt`: when the session ends, when the answer said (the server extends it in use). */
+  | { readonly kind: 'signed-in'; readonly user: AccountUser; readonly expiresAt?: EpochMs }
   | { readonly kind: 'signed-out' }
   /** The check failed: offline, or the server answered with an error other than 401. */
   | { readonly kind: 'unreachable' }
@@ -131,12 +244,16 @@ export interface AuthBackend {
    */
   refreshSession(): Promise<void>
   sendCode(email: string): Promise<AuthResult>
-  verifyCode(email: string, code: string): Promise<AuthResult<AccountUser | null>>
+  verifyCode(email: string, code: string): Promise<AuthResult<SignIn>>
   signInSocial(provider: Provider, callbackURL: string): Promise<AuthResult>
   signOut(): Promise<AuthResult>
   deleteUser(): Promise<AuthResult>
   /** `/api/config`, or null when it cannot be read. */
   loadConfig(): Promise<AuthConfig | null>
+  /** Asks for a device code for the desktop sign-in (`POST /device/code`). */
+  requestDeviceCode?(): Promise<AuthResult<DeviceCode>>
+  /** Asks once whether the device code was approved (`POST /device/token`). Never rejects. */
+  pollDeviceToken?(deviceCode: string): Promise<DevicePoll>
 }
 
 /** Where the last seen account is kept between visits. */
@@ -168,7 +285,11 @@ export interface AuthClientOptions {
   readonly baseURL?: string | undefined
   /** `fetch` for every request (tests). */
   readonly fetch?: typeof fetch | undefined
-  /** A bearer token for clients without the session cookie (the desktop app, M5). */
+  /**
+   * A bearer token for clients without the session cookie (the desktop app). With it, requests
+   * go without credentials: the API's CORS answers to the desktop origin carry no credentials
+   * flag, and there is no cookie to send.
+   */
   readonly tokenProvider?: (() => string | null | undefined) | undefined
 }
 
@@ -187,7 +308,10 @@ export function createAppAuthClient(options: AuthClientOptions = {}) {
     fetchOptions: {
       ...(fetchImpl ? { customFetchImpl: fetchImpl } : {}),
       ...(tokenProvider
-        ? { auth: { type: 'Bearer' as const, token: () => tokenProvider() ?? undefined } }
+        ? {
+            auth: { type: 'Bearer' as const, token: () => tokenProvider() ?? undefined },
+            credentials: 'omit' as const,
+          }
         : {}),
     },
   })
@@ -254,7 +378,7 @@ export function toAccountUser(value: unknown): AccountUser | null {
 
 /** The session atom's state, as far as the report needs it. */
 interface SessionAtomState {
-  readonly data: { readonly user?: unknown } | null
+  readonly data: { readonly user?: unknown; readonly session?: unknown } | null
   readonly error: unknown
   readonly isPending: boolean
   readonly isRefetching?: boolean | undefined
@@ -268,7 +392,10 @@ interface SessionAtomState {
 export function sessionReport(state: SessionAtomState): SessionReport {
   if (state.isRefetching === true) return { kind: 'pending' }
   const user = state.data ? toAccountUser(state.data.user) : null
-  if (user) return { kind: 'signed-in', user }
+  if (user) {
+    const expiresAt = sessionExpiry(state.data?.session)
+    return expiresAt === null ? { kind: 'signed-in', user } : { kind: 'signed-in', user, expiresAt }
+  }
   if (state.isPending) return { kind: 'pending' }
   if (state.error !== null && state.error !== undefined) {
     const status =
@@ -277,6 +404,84 @@ export function sessionReport(state: SessionAtomState): SessionReport {
     return status === 401 ? { kind: 'signed-out' } : { kind: 'unreachable' }
   }
   return { kind: 'signed-out' }
+}
+
+/** When a Better Auth session object expires (a `Date` or ISO text), or null when it does not say. */
+function sessionExpiry(session: unknown): EpochMs | null {
+  if (typeof session !== 'object' || session === null) return null
+  const value: unknown = (session as Record<string, unknown>).expiresAt
+  const time =
+    value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : NaN
+  return Number.isFinite(time) && time > 0 ? time : null
+}
+
+/** The `grant_type` of the device token request (RFC 8628 § 3.4). */
+const DEVICE_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code'
+
+/**
+ * The approval page for `userCode`: the server's `verification_uri_complete` when it is an
+ * `http(s)` URL (the public origin, where the web app runs), else `/device?user_code=` on
+ * `origin` (the API's).
+ */
+export function verificationUrlFor(userCode: string, fromServer: unknown, origin: string): string {
+  if (typeof fromServer === 'string') {
+    try {
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local, never read reactively
+      const url = new URL(fromServer)
+      if (url.protocol === 'https:' || url.protocol === 'http:') return url.href
+    } catch {
+      // Not a URL: use our own.
+    }
+  }
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local, never read reactively
+  const query = new URLSearchParams({ [DEVICE_USER_CODE_PARAM]: userCode })
+  return `${origin}${DEVICE_VERIFICATION_PATH}?${query.toString()}`
+}
+
+/** A device code from a `POST /device/code` body, or null when the body is not one. */
+export function parseDeviceCode(body: unknown, origin: string): DeviceCode | null {
+  if (typeof body !== 'object' || body === null) return null
+  const record = body as Record<string, unknown>
+  const { device_code: deviceCode, user_code: userCode, expires_in: expiresIn } = record
+  if (typeof deviceCode !== 'string' || deviceCode === '') return null
+  if (typeof userCode !== 'string' || userCode === '') return null
+  if (typeof expiresIn !== 'number' || !(expiresIn > 0)) return null
+  const interval = typeof record.interval === 'number' && record.interval > 0 ? record.interval : 5
+  return {
+    deviceCode,
+    userCode,
+    verificationUrl: verificationUrlFor(userCode, record.verification_uri_complete, origin),
+    expiresIn,
+    interval,
+  }
+}
+
+/** One device token poll's answer: the token, or what the error body (or status) says. */
+export function devicePoll(data: unknown, error: unknown): DevicePoll {
+  if (error !== null && error !== undefined) {
+    const record = typeof error === 'object' ? (error as Record<string, unknown>) : {}
+    const status = typeof record.status === 'number' ? record.status : 0
+    switch (record.error) {
+      case 'authorization_pending':
+        return { kind: 'pending' }
+      case 'slow_down':
+        return { kind: 'slow-down' }
+      case 'access_denied':
+        return { kind: 'denied' }
+      case 'expired_token':
+        return { kind: 'expired' }
+    }
+    // The server's own rate limit: poll less often.
+    if (status === 429) return { kind: 'slow-down' }
+    return { kind: 'failed', error: authErrorFor(status) }
+  }
+  if (typeof data === 'object' && data !== null) {
+    const { access_token: token, expires_in: expiresIn } = data as Record<string, unknown>
+    if (typeof token === 'string' && token !== '' && typeof expiresIn === 'number') {
+      return { kind: 'granted', token, expiresIn }
+    }
+  }
+  return { kind: 'failed', error: 'unknown' }
 }
 
 /** The server's configuration from a `ConfigResponse` body, or null when it is not one. */
@@ -300,11 +505,15 @@ export interface BetterAuthBackendOptions {
   readonly configUrl?: string | undefined
 }
 
+/** An {@link AuthBackend} with the device sign-in, as Better Auth's client has it. */
+export type DeviceAuthBackend = AuthBackend &
+  Required<Pick<AuthBackend, 'requestDeviceCode' | 'pollDeviceToken'>>
+
 /** The {@link AuthBackend} over Better Auth's client. */
 export function createBetterAuthBackend(
   client: AppAuthClient,
   options: BetterAuthBackendOptions = {},
-): AuthBackend {
+): DeviceAuthBackend {
   const configUrl = options.configUrl ?? apiUrl(API_PATHS.config)
   const request = options.fetch ?? ((url: string, init?: RequestInit) => fetch(url, init))
   return {
@@ -320,7 +529,15 @@ export function createBetterAuthBackend(
       ),
     async verifyCode(email, otp) {
       const result = await call(() => client.signIn.emailOtp({ email, otp }))
-      return result.ok ? { ok: true, value: toAccountUser(result.value?.user) } : result
+      if (!result.ok) return result
+      const token = result.value?.token
+      return {
+        ok: true,
+        value: {
+          user: toAccountUser(result.value?.user),
+          token: typeof token === 'string' && token !== '' ? token : null,
+        },
+      }
     },
     signInSocial: async (provider, callbackURL) =>
       withoutValue(
@@ -330,6 +547,29 @@ export function createBetterAuthBackend(
       ),
     signOut: async () => withoutValue(await call(() => client.signOut())),
     deleteUser: async () => withoutValue(await call(() => client.deleteUser())),
+    // The desktop sign-in; a web build (`__DESKTOP__` false), which never starts it, leaves it out.
+    requestDeviceCode: __DESKTOP__
+      ? async () => {
+          const result = await call(() => client.device.code({ client_id: DESKTOP_CLIENT_ID }))
+          if (!result.ok) return result
+          const code = parseDeviceCode(result.value, apiOrigin() || (pageOrigin() ?? ''))
+          return code ? { ok: true, value: code } : { ok: false, error: 'unknown' }
+        }
+      : () => Promise.resolve({ ok: false, error: 'unknown' }),
+    pollDeviceToken: __DESKTOP__
+      ? async (deviceCode) => {
+          try {
+            const { data, error } = await client.device.token({
+              grant_type: DEVICE_GRANT_TYPE,
+              device_code: deviceCode,
+              client_id: DESKTOP_CLIENT_ID,
+            })
+            return devicePoll(data, error)
+          } catch {
+            return { kind: 'failed', error: 'network' }
+          }
+        }
+      : () => Promise.resolve({ kind: 'failed', error: 'unknown' }),
     async loadConfig() {
       try {
         const response = await request(configUrl, { headers: { Accept: 'application/json' } })
@@ -391,6 +631,13 @@ export interface AuthStoreOptions {
   readonly cache?: AccountCache | null | undefined
   /** The page; the window by default, null outside a browser. */
   readonly page?: AuthPage | null | undefined
+  /**
+   * Where the bearer token lives, for a client without the session cookie (the desktop app);
+   * none by default (the web). Without it, sign-ins keep no token and the device sign-in fails.
+   */
+  readonly tokens?: TokenStore | null | undefined
+  /** The device clock, for token and device code expiry; `Date.now` by default. */
+  readonly clock?: Clock | undefined
 }
 
 function defaultPage(): AuthPage | null {
@@ -414,6 +661,8 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
   const backend = options.backend ?? createBetterAuthBackend(createAppAuthClient())
   const cache = options.cache === undefined ? createAccountCache() : options.cache
   const page = options.page === undefined ? defaultPage() : options.page
+  const tokens = options.tokens ?? null
+  const clock = options.clock ?? Date.now
 
   const cached = cache?.read() ?? null
   let status = $state<AuthStatus>(cached ? 'signed-in' : 'unknown')
@@ -425,6 +674,24 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
   let stopWatching: (() => void) | null = null
   let configLoaded = false
   let configLoading: Promise<void> | null = null
+  let device = $state.raw<DeviceSignIn | null>(null)
+  /** Bumped by every start or cancel of the device sign-in, so a stale poll loop stops. */
+  let deviceRun = 0
+
+  /** When this store last kept a token; a check answered meanwhile may predate it. */
+  let keptAt = Number.NEGATIVE_INFINITY
+
+  /** Keeps the token a sign-in returned (a bearer client only). */
+  function keepToken(token: string | null, expiresAt: EpochMs): void {
+    if (tokens === null || token === null) return
+    keptAt = clock()
+    tokens.set({ token, expiresAt })
+  }
+
+  /** Forgets the token: signed out, deleted, or the server no longer knows it. */
+  function dropToken(): void {
+    if (tokens?.current != null) tokens.set(null)
+  }
 
   function signedIn(next: AccountUser): void {
     if (!sameUser(user, next)) {
@@ -443,9 +710,81 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
   }
 
   function follow(report: SessionReport): void {
-    if (report.kind === 'signed-in') signedIn(report.user)
-    else if (report.kind === 'signed-out') signedOut()
+    if (report.kind === 'signed-in') {
+      signedIn(report.user)
+      // The server extends a session in use: keep the stored token's expiry in step.
+      const held = tokens?.current ?? null
+      if (held !== null && report.expiresAt !== undefined && report.expiresAt !== held.expiresAt) {
+        tokens?.set({ token: held.token, expiresAt: report.expiresAt })
+      }
+    } else if (report.kind === 'signed-out') {
+      signedOut()
+      // The check went with the token (if it was still usable): the server no longer knows it.
+      // Not a token kept moments ago, though: a check that started before it went without it.
+      if (clock() - keptAt > TOKEN_GRACE_MS) dropToken()
+    }
     // `pending` and `unreachable` keep what is known: the cached account, or `unknown`.
+  }
+
+  /** Waits `ms`, then says whether device sign-in run `run` is still the current one. */
+  function waitFor(run: number, ms: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(run === deviceRun)
+      }, ms)
+    })
+  }
+
+  /** Polls for the device code's token until it is approved, refused, expired or cancelled. */
+  async function pollDevice(run: number, code: DeviceCode, expiresAt: EpochMs): Promise<void> {
+    const poll = backend.pollDeviceToken?.bind(backend)
+    if (!poll) return
+    let interval = code.interval * 1000
+    for (;;) {
+      if (!(await waitFor(run, interval))) return
+      if (clock() >= expiresAt) {
+        device = { phase: 'expired' }
+        return
+      }
+      const answer = await poll(code.deviceCode)
+      if (run !== deviceRun) return
+      const waiting = untrack(() => device)
+      const setRetrying = (retrying: boolean): void => {
+        if (waiting?.phase === 'waiting' && waiting.retrying !== retrying) {
+          device = { ...waiting, retrying }
+        }
+      }
+      switch (answer.kind) {
+        case 'pending':
+          setRetrying(false)
+          break
+        case 'slow-down':
+          // RFC 8628 § 3.5: five seconds more for this and every later poll.
+          interval += 5000
+          setRetrying(false)
+          break
+        case 'denied':
+          device = { phase: 'denied' }
+          return
+        case 'expired':
+          device = { phase: 'expired' }
+          return
+        case 'failed':
+          if (answer.error === 'network') {
+            setRetrying(true)
+            break
+          }
+          error = answer.error
+          device = null
+          return
+        case 'granted':
+          keepToken(answer.token, clock() + answer.expiresIn * 1000)
+          // The check with the new token signs in (`follow`).
+          await backend.refreshSession().catch(() => undefined)
+          if (run === deviceRun) device = null
+          return
+      }
+    }
   }
 
   function loadConfig(): Promise<void> {
@@ -537,7 +876,9 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
       return run(
         () => backend.verifyCode(email.trim(), code.replace(/\s+/g, '')),
         (next) => {
-          if (next) signedIn(next)
+          // Until the session check reports the real expiry, the server's session lifetime.
+          keepToken(next.token, clock() + DEFAULT_SESSION_MS)
+          if (next.user) signedIn(next.user)
           // The session check that the sign-in triggers fills in the user otherwise.
           else void backend.refreshSession().catch(() => undefined)
         },
@@ -549,24 +890,110 @@ export function createAuthStore(options: AuthStoreOptions = {}): AuthStore {
       return run(() => backend.signInSocial(provider, callbackURL))
     },
 
-    signOut() {
-      return run(() => backend.signOut(), signedOut)
+    async signOut() {
+      if (tokens === null) {
+        return run(
+          () => backend.signOut(),
+          () => {
+            signedOut()
+          },
+        )
+      }
+      // The token goes whatever the server says: someone leaving a shared computer while the
+      // server is out of reach must not stay signed in. The revoke (which needs the token) first.
+      const revoked = await run(() => backend.signOut())
+      error = null
+      dropToken()
+      signedOut()
+      return revoked ? true : 'device-only'
     },
 
     deleteAccount() {
-      return run(() => backend.deleteUser(), signedOut)
+      return run(
+        () => backend.deleteUser(),
+        () => {
+          dropToken()
+          signedOut()
+        },
+      )
     },
 
     clearError() {
       error = null
     },
+
+    get device() {
+      return device
+    },
+
+    async startDeviceSignIn() {
+      const current = ++deviceRun
+      error = null
+      const request = backend.requestDeviceCode?.bind(backend)
+      if (tokens === null || !request || !backend.pollDeviceToken) {
+        device = null
+        error = 'unknown'
+        return false
+      }
+      device = { phase: 'requesting' }
+      const result = await request()
+      if (current !== deviceRun) return false
+      if (!result.ok) {
+        device = null
+        error = result.error
+        return false
+      }
+      const code = result.value
+      const expiresAt = clock() + code.expiresIn * 1000
+      device = {
+        phase: 'waiting',
+        userCode: code.userCode,
+        verificationUrl: code.verificationUrl,
+        expiresAt,
+        retrying: false,
+      }
+      void pollDevice(current, code, expiresAt)
+      return true
+    },
+
+    cancelDeviceSignIn() {
+      deviceRun++
+      device = null
+    },
   }
 }
 
+/**
+ * The desktop app's token store: the device store's `auth` group (`settingsStore.auth`). None on
+ * the web, which has the session cookie.
+ */
+const appTokens: TokenStore | null =
+  __DESKTOP__ && platform.kind === 'tauri'
+    ? {
+        get current() {
+          return settingsStore.auth
+        },
+        set(auth) {
+          settingsStore.setAuth(auth)
+        },
+      }
+    : null
+
+/**
+ * The bearer token the desktop app sends: the stored one while it has not expired, else null
+ * (always null on the web). The sync socket offers it as its `timer-auth.<token>` subprotocol.
+ */
+export function bearerToken(): string | null {
+  return usableToken(appTokens?.current ?? null, Date.now())
+}
+
 /** The app's Better Auth client, for the endpoints the store does not wrap (device approval). */
-export const authClient: AppAuthClient = createAppAuthClient()
+export const authClient: AppAuthClient = createAppAuthClient(
+  appTokens === null ? {} : { tokenProvider: bearerToken },
+)
 
 /** The app's auth state. `main.ts` calls `start()`. */
 export const authStore: AuthStore = createAuthStore({
   backend: createBetterAuthBackend(authClient),
+  tokens: appTokens,
 })

@@ -7,11 +7,12 @@
 import type { AuthStore } from '../../state/auth.svelte'
 import type { RemoteSync, RemoteSyncStatus } from '../../sync/remote.svelte'
 
-export type { AccountUser, AuthError, AuthStatus } from '../../state/auth.svelte'
+export type { AccountUser, AuthError, AuthStatus, DeviceSignIn } from '../../state/auth.svelte'
 
 /**
  * The auth state the account UI reads and the actions it calls. The actions resolve to whether
- * they worked and leave the reason in `error`; they never reject.
+ * they worked and leave the reason in `error`; they never reject. The desktop sign-in through the
+ * browser (`device`, `startDeviceSignIn`, `cancelDeviceSignIn`) is there on desktop only.
  */
 export type AccountAuth = Pick<
   AuthStore,
@@ -25,7 +26,7 @@ export type AccountAuth = Pick<
   | 'signOut'
   | 'deleteAccount'
 > &
-  Partial<Pick<AuthStore, 'refresh'>>
+  Partial<Pick<AuthStore, 'refresh' | 'device' | 'startDeviceSignIn' | 'cancelDeviceSignIn'>>
 
 /** The sync connection: off (signed out or stopped), connecting, online, or offline (retrying). */
 export type SyncStatus = RemoteSyncStatus

@@ -34,7 +34,7 @@
  * as soon as server time is close enough to those stamps.
  *
  * The browser sends the session cookie with the upgrade; a client without the cookie (the desktop
- * app, M5) passes its bearer token, which travels as a `timer-auth.<token>` subprotocol
+ * app) passes its bearer token, which travels as a `timer-auth.<token>` subprotocol
  * (`protocol.ts`).
  */
 import { untrack } from 'svelte'
@@ -42,6 +42,7 @@ import { createWsSynchronizer } from 'tinybase/synchronizers/synchronizer-ws-cli
 
 import type { Clock, EpochMs, Ms } from '../core'
 import { appClock, clockOffset, onClockOffsetChange } from '../state/app-clock'
+import { bearerToken } from '../state/auth.svelte'
 import { wsUrl } from './api'
 import {
   API_PATHS,
@@ -536,9 +537,11 @@ export function onSessionDoubt(check: (() => void) | null): void {
 
 /**
  * The app's connection: the app's synced store, `/api/sync` on the API origin with the session
- * cookie, and the server-time offset measured again on every open.
+ * cookie (the desktop app: its stored bearer token), and the server-time offset measured again on
+ * every open.
  */
 export const remoteSync: RemoteSync = createRemoteSync(appStores.synced, {
+  token: bearerToken,
   onOpen: () => {
     void clockSync.measure()
   },

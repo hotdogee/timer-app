@@ -1,6 +1,7 @@
 /**
  * System notifications for time's up (spec Q7). The web implementation uses the `Notification`
- * constructor; desktop (M5) will plug in the Tauri notification plugin behind the same interface.
+ * constructor; the desktop app uses the Tauri notification plugin behind the same interface
+ * (`tauri/notifications.ts`).
  */
 
 /** Permission to show notifications, or `'unsupported'` when the platform has no notifications. */

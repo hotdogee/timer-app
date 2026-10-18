@@ -26,6 +26,13 @@
   bar shows the sync status as a cloud that opens Settings › Account, which is also where the app
   opens after a provider sign-in that failed, so its message is seen. Times the app stamps (the
   export's date included) are app time, which follows the server's clock while signed in.
+
+  Desktop (`state/desktop.svelte.ts`; nothing on the web): the shell hears whether a card runs and
+  the close behavior, the tray gets its labels in the app's language, and the global hotkey and
+  the tray's "Start or pause the last card" act on the last-used card through the keyboard
+  controller. The mini window (the header button, `T`, the palette) opens through the platform:
+  a window of its own on desktop, Picture-in-Picture in Chromium. The desktop app's update prompt
+  shares the snackbar slot.
 -->
 <script lang="ts">
   import { tick, untrack } from 'svelte'
@@ -39,6 +46,7 @@
   import type { AppData } from './state/app-data.svelte'
   import { authStore } from './state/auth.svelte'
   import { cardStore } from './state/cards.svelte'
+  import { startDesktop } from './state/desktop.svelte'
   import {
     createKeyboardController,
     detectKeyPlatform,
@@ -57,11 +65,13 @@
   import CardGrid from './ui/grid/CardGrid.svelte'
   import EmptyState from './ui/grid/EmptyState.svelte'
   import KeyboardHelp from './ui/KeyboardHelp.svelte'
+  import { openMiniWindow } from './ui/mini/open'
   import CommandPalette from './ui/palette/CommandPalette.svelte'
   import { shortcutLabel } from './ui/palette/shortcuts'
   import Snackbar from './ui/primitives/Snackbar.svelte'
   import type * as SettingsUi from './ui/settings'
   import { applyAppearance } from './ui/theme/apply'
+  import UpdatePrompt from './ui/UpdatePrompt.svelte'
 
   interface Props {
     /** The loaded app data (`startAppData`, in main.ts); Import replaces it. */
@@ -271,6 +281,19 @@
     }
   }
 
+  /**
+   * A snackbar button that is about to go away (the update prompt's Install and restart, Try
+   * again, Later): when it has the focus, the focus goes back to the selected card, so keyboard and
+   * screen-reader users stay with the cards instead of falling to the page.
+   */
+  function refocusFromSnackbar(): void {
+    if (snackbarHost?.contains(document.activeElement) !== true) return
+    void tick().then(() => {
+      const selected = cardStore.list.selectedId
+      if (selected !== null) cardElement(document, selected)?.focus()
+    })
+  }
+
   /** Esc after the keyboard layer cleared typed digits: close the rename field, else edit mode. */
   function cancel(): void {
     keepFocusInCard(() => {
@@ -390,8 +413,8 @@
     toggleEditMode,
     startRename,
     toggleFullscreen,
-    miniWindow: () => {
-      // Always-on-top mini window: desktop milestone (M5).
+    miniWindow: (id) => {
+      void openMiniWindow(id)
     },
     openPresets,
     deleteCard,
@@ -418,6 +441,30 @@
   })
   $effect(() => () => {
     keyboard.destroy()
+  })
+
+  // ── Desktop: the shell, the tray and the global hotkeys ─────────────────────────────────
+  // Nothing starts on the web, which has no shell; a web build (`__DESKTOP__` false) leaves the
+  // code out.
+  const stopDesktop = __DESKTOP__
+    ? startDesktop({
+        platform,
+        list: () => cardStore.list,
+        desktop: () => settingsStore.desktop,
+        trayLabels: () => ({
+          show: m.tray_show(),
+          toggleLast: m.tray_toggle_last(),
+          quit: m.tray_quit(),
+        }),
+        toggleLast: () => {
+          keyboard.toggleLast()
+        },
+      })
+    : () => undefined
+  /** The desktop app's update prompt; none in a web build (the web has the service worker's). */
+  const DesktopUpdatePrompt = __DESKTOP__ ? UpdatePrompt : null
+  $effect(() => () => {
+    stopDesktop()
   })
 
   // ── PWA: "Update ready" and "Ready to work offline" ──────────────────────────────────────
@@ -535,6 +582,13 @@
         key={pwaNotice}
         onclose={closePwaSnackbar}
       />
+      {#if DesktopUpdatePrompt !== null && platform.updater.supported}
+        <!-- The desktop app's update prompt (the web has the service worker's, above). -->
+        <DesktopUpdatePrompt
+          blocked={removed !== null || dialogOpen || pwaOpen}
+          onleave={refocusFromSnackbar}
+        />
+      {/if}
     </div>
   </div>
 </main>
@@ -551,6 +605,7 @@
     timeStyle,
     onStart,
     takeTyped,
+    miniWindow: platform.windows.supported,
   }}
   {bindings}
   platform={keyPlatform}

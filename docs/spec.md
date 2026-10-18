@@ -33,11 +33,11 @@ Design references in [design/](design/):
 
 Visuals follow the Google (Material 3) card, except the Timer/Stopwatch toggle is replaced by the card's type icon (⧗ timer, ◷ stopwatch) and name. Card colors come from the seed's Material palettes: in dark mode the card is secondary tone 20 on a neutral-variant tone 14 page, and chips, tonal buttons and the ring track are secondary tone 27; in light mode the card is white on neutral-variant tone 94, with secondary tone 90 for the tonal parts. Material's `surface-container` roles looked too dark and grey beside the reference card. Hero digits are 17% of the ring diameter.
 
-Header: icon and name, mute, fullscreen, always-on-top mini window (hidden until the desktop milestone).
+Header: icon and name, mute, fullscreen, always-on-top mini window (desktop, and Chromium browsers through Document Picture-in-Picture; hidden elsewhere).
 
 Fullscreen uses the browser Fullscreen API; where it is unavailable (iOS Safari) the card expands into an overlay. `Esc` leaves either. The fullscreen card follows the selection, so arrow keys switch which card fills the screen.
 
-Mini window: a compact card floating above other apps. Desktop uses a Tauri always-on-top window; web uses Document Picture-in-Picture (Chrome and Edge; the button is hidden elsewhere).
+Mini window: a compact card floating above other apps. Desktop uses a Tauri always-on-top window; web uses Document Picture-in-Picture (Chrome and Edge; the button is hidden elsewhere). It shows the name, ring and digits, Start / Pause, Reset or Dismiss and `+1:00`; a pin turns floating off; `Esc` closes it; its position is remembered. Opening it for another card switches the card. Its controls are at least 32 px, an exception to the 44 px rule, so it fits a 240×150 window.
 
 ### Timer
 
@@ -111,7 +111,7 @@ Digits and `Backspace` are fixed; everything else is rebindable. `Mod` is `Cmd` 
 
 `Mod+K` opens a searchable list of every command (new cards, presets, actions on the selected card, edit mode, help), each with its shortcut. Matching is a case-insensitive subsequence match. Typing 1–6 digits offers "New timer HH:MM:SS" first; `Enter` creates and starts it.
 
-Global hotkeys (desktop, opt-in): start/pause the last-used card without focusing the app.
+Global hotkeys (desktop, opt-in, set in Settings › Desktop): start or pause the last-used card (the card last started, resumed or paused in this session, else the selected one) without focusing the app, and show or hide the app. Both are unbound at first; a combo another app holds is reported as taken.
 
 ## Time's up
 
@@ -125,14 +125,14 @@ Default: the sound loops and the card counts up in overtime (`-0:12`) until dism
 
 Quick-add chips pressed while a timer runs extend both the remaining time and the total, so the ring rescales.
 
-One sound plays at a time: it runs while any unmuted card is ringing and stops when none is. Audio is unlocked on the first click or key press and again on every Start, as browsers require. Notification permission is requested the first time a timer starts; clicking a notification focuses the app and dismisses that card. A Web Worker holds the next deadline so a hidden browser tab still rings on time.
+One sound plays at a time: it runs while any unmuted card is ringing and stops when none is. Audio is unlocked on the first click or key press and again on every Start, as browsers require. Notification permission is requested the first time a timer starts; clicking a notification focuses the app and dismisses that card (web; desktop notifications cannot reliably reach the app, the tray does that). A Web Worker holds the next deadline so a hidden browser tab still rings on time.
 
 ## Persistence and instances
 
 - Cards and their state survive reloads, closing the window and reboots. Running timers keep running; a timer that ended while the app was closed is ringing when it opens.
 - Storage: a synced TinyBase store (cards, presets, behavior settings) in IndexedDB and a device-only store (appearance, language) in localStorage, so the theme and language are known before the first paint. A fresh install starts with one 5:00 timer and the built-in presets; deleting every card does not bring them back. If IndexedDB is unavailable or does not answer within 3 seconds, the app runs in memory for that session, warns in the console and never overwrites saved data.
 - Web: installable PWA that works offline; a new version shows an "Update ready" snackbar with Reload and Later that stays until one is chosen.
-- Desktop: closing the window hides the app to the tray / menu bar while any timer runs, so alarms still ring; otherwise it quits.
+- Desktop: closing the window hides the app to the tray / menu bar while any timer or stopwatch runs or the mini window is open, so alarms still ring; otherwise it quits. Settings › Desktop can make it always hide or always quit. Launched with `--minimized` (launch at login) it starts in the tray. A hidden window still rings on time (the smoke test measures under 50 ms late).
 - Multiple browser tabs stay in sync (`BroadcastChannel`). Desktop runs as a single instance.
 - Cross-device sync: see [Sync](#sync).
 
@@ -175,12 +175,12 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 |---|---|
 | Appearance | Theme (system / light / dark), seed color, font (Roboto Flex, Inter, system), digit weight, digit size, ring thickness, card density, language |
 | Behavior | Time format (compact / fixed), 12/24-hour, quick-add chip values, sound, volume, loop or play once, auto-stop, overtime counter, notifications, confirm before delete |
-| Keyboard | Rebind any shortcut; global hotkeys (desktop) |
+| Keyboard | Rebind any shortcut (global hotkeys live under Desktop) |
 | Presets | Add, rename, change the duration, reorder, delete (no Reset: presets are user data) |
-| Desktop | Launch at login, close behavior, always-on-top |
+| Desktop | Launch at login, close behavior, mini window stays on top, global hotkeys (start or pause the last card; show or hide the app) |
 | Data | Export / import cards, presets and settings (JSON) |
 | Account | Sign in / out, "Sync this device" switch (per device), download the server copy, delete account and data |
-| About | Version, platform, source code, license |
+| About | Version, platform, source code, license, privacy policy, check for updates (desktop) |
 
 ## Milestones
 
@@ -190,7 +190,7 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 | M2 | Designed Material 3 card, card grid, edit mode, keyboard layer, command palette | Done 2026-10-18 |
 | M3 | TinyBase stores on IndexedDB, settings and themes, i18n (en, zh-TW, ja), PWA | Done 2026-10-18 |
 | M4 | Sync server on Cloudflare Workers, Better Auth, sign-in flows | Done 2026-10-18 |
-| M5 | Desktop: tray, background alarms, mini window, global hotkeys, updater, autostart | Planned |
+| M5 | Desktop: tray, background alarms, mini window, global hotkeys, updater, autostart | Done 2026-10-18 |
 | M6 | Release: signing, CI builds, GitHub Releases, winget, Homebrew, Microsoft Store | Planned |
 
 ## Open questions
@@ -245,3 +245,7 @@ New questions continue from Q24.
 | 2026-10-18 | — | Sync socket: the bearer token travels only in the `Sec-WebSocket-Protocol` header (`timer-auth.<token>`, answered with `timer-sync`), never in the URL. The Worker passes the session to the Durable Object, which checks it on every message and closes sockets with 4401 on sign-out, revocation or account deletion. Heartbeat ping every 30 s; no pong within 10 s reconnects. |
 | 2026-10-18 | — | Sign-in limits: 6-digit codes valid 10 minutes, 5 attempts, resends reuse the code; 5 codes per address per hour; a server-wide daily email cap (default 100); per-IP rate limits of 60 a minute per path, 10 for `/device`. In production without a mail key the server refuses to send and never logs codes. OAuth failures return to the app with `?error=`. |
 | 2026-10-18 | — | Client sync: a "Sync this device" switch (device-only, back on after sign-out); sync starts after the first clock measurement; first-run seed rows are stamped at time zero so the account's edits and deletions beat a fresh device's defaults; a timer's settle to ringing is stamped right after its running stamp so it never undoes a later dismiss; the session is re-checked on a 4401 close or three failed connects. Pages get `frame-ancestors 'none'`, nosniff and a referrer policy through `public/_headers`. |
+| 2026-10-18 | — | Desktop shell (M5): Tauri plugins single-instance, window-state, notification, global-shortcut, autostart, updater, process and opener, plus the core tray. Tray menu: Show, Start or pause the last card, Quit. Close policy per Settings › Desktop; the default hides while anything runs or the mini window is open. The OS accent seeds the theme and follows changes on Windows (Q20 done). The web worker wake scheduler is enough on desktop: no Rust alarm scheduler. |
+| 2026-10-18 | — | Mini window: a Tauri window at `/mini?card=` (320×200 by default, undecorated, on top by default, position remembered, 32 px controls); Document Picture-in-Picture on the web; `/mini` also works as a plain page without the pin. |
+| 2026-10-18 | — | Desktop sign-in: device authorization through the system browser (no deep link); the 30-day bearer token is kept in the app's local storage unencrypted, an accepted risk until M6 moves it to the OS credential store; signing out while offline still drops it. Provider buttons are hidden on desktop. |
+| 2026-10-18 | — | Updater: wired with a placeholder public key, so this build reports "not configured" until M6 supplies the key; Settings › About has Check for updates and the update prompt offers Install and restart. Capabilities are per window with an app ACL (every command granted explicitly); the debug-only smoke command exists only in debug builds; the opener may open only the device page and https URLs. |

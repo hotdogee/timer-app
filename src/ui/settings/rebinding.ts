@@ -24,10 +24,14 @@ export interface ShortcutGroup {
 }
 
 /**
- * The rebinding list's groups, in the cheat sheet's order. Every action appears once, except
- * {@link HIDDEN_ACTIONS}.
+ * Actions the list leaves out unless the platform has them: the mini window, which needs a Tauri
+ * window or Document Picture-in-Picture (`platform.windows.supported`). Settings › Keyboard
+ * passes an empty list where the mini window is supported.
  */
-export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = Object.freeze([
+export const HIDDEN_ACTIONS: readonly ActionId[] = Object.freeze(['miniWindow'])
+
+/** Every group with every action, in the cheat sheet's order. */
+const ALL_GROUPS: readonly ShortcutGroup[] = Object.freeze([
   {
     title: m.shortcut_group_running,
     actions: ['toggle', 'start', 'dismiss', 'reset', 'lap'],
@@ -41,6 +45,7 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = Object.freeze([
       'rename',
       'mute',
       'fullscreen',
+      'miniWindow',
       'deleteCard',
       'undo',
     ],
@@ -61,8 +66,23 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = Object.freeze([
   { title: m.help_section_app, actions: ['palette', 'help', 'settings', 'editMode', 'cancel'] },
 ])
 
-/** Actions left out of the list: the mini window stays hidden until it ships (M5). */
-export const HIDDEN_ACTIONS: readonly ActionId[] = Object.freeze(['miniWindow'])
+/**
+ * The rebinding list's groups, in the cheat sheet's order: every action once, except `hidden`
+ * ({@link HIDDEN_ACTIONS} by default). Groups left empty are dropped.
+ */
+export function shortcutGroups(
+  hidden: readonly ActionId[] = HIDDEN_ACTIONS,
+): readonly ShortcutGroup[] {
+  return Object.freeze(
+    ALL_GROUPS.map((group) => ({
+      title: group.title,
+      actions: group.actions.filter((action) => !hidden.includes(action)),
+    })).filter((group) => group.actions.length > 0),
+  )
+}
+
+/** The groups without {@link HIDDEN_ACTIONS}: the list where there is no mini window. */
+export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = shortcutGroups()
 
 /** One combo bound to an action, as stored and as shown. */
 export interface BoundKey {
@@ -184,7 +204,7 @@ const MAX_TEXT_LENGTH = 64
 /**
  * Classifies `pressed`, recorded for `action`: `reserved` when it cannot be bound
  * (`keymap.isReservedCombo`, or a key the keymap cannot store), `conflict` when other listed
- * actions already use it, `free` otherwise. A character whose Shift depends on the layout (`?`,
+ * actions (all but `hidden`) already use it, `free` otherwise. A character whose Shift depends on the layout (`?`,
  * `+`) is taken without Shift, as matching ignores it there, so Shift+/ records as `?`. The label
  * is the combo's display text on `platform`.
  */
@@ -193,6 +213,7 @@ export function classifyRecording(
   action: ActionId,
   pressed: KeyCombo,
   platform: Platform,
+  hidden: readonly ActionId[] = HIDDEN_ACTIONS,
 ): Recording {
   const combo = keymap.isShiftInsensitive(pressed.key) ? { ...pressed, shift: false } : pressed
   const label = keymap.formatCombo(combo, platform)
@@ -211,7 +232,7 @@ export function classifyRecording(
       other !== action &&
       keymap.parsedCombos(bindings, other, platform).some((key) => sameCombo(key.combo, combo)),
   )
-  const owners = moveFrom.filter((other) => !HIDDEN_ACTIONS.includes(other))
+  const owners = moveFrom.filter((other) => !hidden.includes(other))
   return owners.length > 0
     ? { kind: 'conflict', label, text, owners, moveFrom }
     : { kind: 'free', label, text, moveFrom }
@@ -226,18 +247,20 @@ export interface SharedShortcut {
 }
 
 /**
- * The combos bound to more than one listed action ({@link HIDDEN_ACTIONS} left out), by action:
- * for each action that shares a combo, the shared combos and the other actions using each. Such overlaps come from an import or from settings recorded on another platform (⌃K on a
- * Mac is Ctrl+K, the palette's key elsewhere); only the first action in `keymap.ACTION_IDS` order
- * gets the key.
+ * The combos bound to more than one listed action (`hidden` left out, {@link HIDDEN_ACTIONS} by
+ * default), by action: for each action that shares a combo, the shared combos and the other
+ * actions using each. Such overlaps come from an import or from settings recorded on another
+ * platform (⌃K on a Mac is Ctrl+K, the palette's key elsewhere); only the first action in
+ * `keymap.ACTION_IDS` order gets the key.
  */
 export function sharedShortcuts(
   bindings: keymap.Bindings,
   platform: Platform,
+  hidden: readonly ActionId[] = HIDDEN_ACTIONS,
 ): ReadonlyMap<ActionId, readonly SharedShortcut[]> {
   const shared = new Map<ActionId, SharedShortcut[]>()
   for (const conflict of keymap.findConflicts(bindings, platform)) {
-    const actions = conflict.actions.filter((action) => !HIDDEN_ACTIONS.includes(action))
+    const actions = conflict.actions.filter((action) => !hidden.includes(action))
     if (actions.length < 2) continue
     for (const action of actions) {
       const list = shared.get(action) ?? []

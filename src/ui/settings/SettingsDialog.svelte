@@ -1,8 +1,8 @@
 <!--
   @component
   The settings dialog (spec › Settings): a modal with the sections (Appearance, Behavior, Keyboard,
-  Presets, Data, Account, About) in a list beside the content when the window is wide, or in a
-  scrolling tab strip above it when not. Every change applies at once, with no Save button; each
+  Desktop in the desktop app only, Presets, Data, Account, About) in a list beside the content
+  when the window is wide, or in a scrolling tab strip above it when not. Every change applies at once, with no Save button; each
   section that holds settings has a Reset. It opens on the last section shown, with focus on that
   section's tab; Esc, the close button, a backdrop click or the settings shortcut (`Mod+,`) again
   close it (a shortcut without Ctrl, Alt or Meta not while a text field has focus), and focus
@@ -26,7 +26,8 @@
 
   import { keymap, type exportFormat, type settings } from '../../core'
   import { m } from '../../i18n'
-  import { platform, type Notifier, type PlatformKind } from '../../platform'
+  import { platform, type Notifier, type Platform, type PlatformKind } from '../../platform'
+  import type { DesktopUpdates } from '../../pwa.svelte'
   import { detectKeyPlatform, isTextEntry } from '../../state/keyboard.svelte'
   import { authStore } from '../../state/auth.svelte'
   import type { PresetStore } from '../../state/presets.svelte'
@@ -43,9 +44,10 @@
   import AppearanceSection from './AppearanceSection.svelte'
   import BehaviorSection from './BehaviorSection.svelte'
   import DataSection from './DataSection.svelte'
+  import DesktopSection from './DesktopSection.svelte'
   import KeyboardSection from './KeyboardSection.svelte'
   import PresetsSection from './PresetsSection.svelte'
-  import { tabId, type SectionId } from './sections'
+  import { sectionsFor, tabId, type SectionId } from './sections'
   import SettingsNav from './SettingsNav.svelte'
   import { APP_VERSION } from './values'
 
@@ -66,7 +68,7 @@
     section?: SectionId
     /** The modifier convention for shortcuts. */
     keyPlatform?: keymap.Platform
-    /** The shell, for About. */
+    /** The shell: Desktop exists only in the desktop app, and Account and About differ there. */
     platformKind?: PlatformKind
     /** The app version, for About. */
     version?: string
@@ -80,6 +82,10 @@
     sync?: SyncInfo | null
     /** This device's sync switch, for Account; the app's by default, null hides it. */
     syncPreference?: SyncPreference | null
+    /** Launch at login, global hotkeys and the mini window, for Desktop; the platform's. */
+    desktopServices?: Pick<Platform, 'autostart' | 'hotkeys' | 'windows'>
+    /** The desktop updater's state, for About; the app's by default. */
+    updates?: DesktopUpdates
   }
 
   let {
@@ -101,11 +107,19 @@
     auth = authStore,
     sync = remoteSync,
     syncPreference = appSyncPreference,
+    desktopServices = platform,
+    updates,
   }: Props = $props()
 
   const uid = $props.id()
   const titleId = `${uid}-title`
   const panelId = `${uid}-panel`
+
+  const sections = $derived(sectionsFor(platformKind))
+  // A section this shell does not have (Desktop, on the web) shows the first one instead.
+  $effect.pre(() => {
+    if (!sections.includes(section)) section = sections[0] ?? 'appearance'
+  })
 
   /** The width from which the dialog (56rem at most, 1rem from each edge) shows a side list. */
   const WIDE_QUERY = 'min-width: 42rem'
@@ -174,6 +188,7 @@
       <nav class="sections">
         <SettingsNav
           bind:current={section}
+          {sections}
           idPrefix={uid}
           {panelId}
           orientation={wide ? 'vertical' : 'horizontal'}
@@ -193,14 +208,16 @@
           <BehaviorSection {settingsStore} {notifier} {previewSound} />
         {:else if section === 'keyboard'}
           <KeyboardSection {settingsStore} platform={keyPlatform} />
+        {:else if section === 'desktop'}
+          <DesktopSection {settingsStore} platform={keyPlatform} services={desktopServices} />
         {:else if section === 'presets'}
           <PresetsSection {presetStore} timeStyle={settingsStore.synced.timeStyle} />
         {:else if section === 'data'}
           <DataSection {cardCount} presetCount={presetStore.presets.length} {onexport} {onimport} />
         {:else if section === 'account'}
-          <AccountSection {auth} {sync} {syncPreference} />
+          <AccountSection {auth} {sync} {syncPreference} desktop={platformKind === 'tauri'} />
         {:else}
-          <AboutSection {version} {platformKind} />
+          <AboutSection {version} {platformKind} {updates} />
         {/if}
       </div>
     </div>

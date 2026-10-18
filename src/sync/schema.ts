@@ -5,7 +5,8 @@
  * - `synced` (a `MergeableStore`, synced across tabs now and devices in M4) holds the `cards` and
  *   `presets` tables and, as values, the behavior settings plus `schemaVersion` and `seededAt`.
  * - `device` (a plain `Store`, never synced) holds the appearance settings and the language as
- *   values, plus `schemaVersion`.
+ *   values, plus `schemaVersion`; on the desktop also the desktop settings and the desktop
+ *   sign-in's bearer token.
  *
  * Every field is its own cell, not one JSON blob per card, so under sync a rename on one device and
  * a start on another merge cell by cell instead of one clobbering the other. No cell has a schema
@@ -85,7 +86,23 @@ export const SYNCED_VALUES_SCHEMA = {
 /** The device store has no tables (typing only: TinyBase treats an empty schema as none). */
 export const DEVICE_TABLES_SCHEMA = {} as const satisfies TablesSchema
 
-/** The values of the device store: the appearance settings and the language. */
+/** The values of the device store that hold the desktop settings, flattened. */
+export const DESKTOP_VALUE_IDS = [
+  'launchAtLogin',
+  'closeBehavior',
+  'miniAlwaysOnTop',
+  'hotkeyToggleLast',
+  'hotkeyShowApp',
+] as const
+
+/** The values of the device store that hold the desktop sign-in's bearer token. */
+export const AUTH_VALUE_IDS = ['authToken', 'authExpiresAt'] as const
+
+/**
+ * The values of the device store: the appearance settings and the language, the desktop settings
+ * (a hotkey's combo is `''` when it is unbound), and the bearer token (both values absent when
+ * signed out).
+ */
 export const DEVICE_VALUES_SCHEMA = {
   schemaVersion: { type: 'number' },
   themeMode: { type: 'string' },
@@ -96,7 +113,21 @@ export const DEVICE_VALUES_SCHEMA = {
   ringScale: { type: 'number' },
   density: { type: 'string' },
   locale: { type: 'string' },
-} as const satisfies ValuesSchema & Record<keyof settings.DeviceSettings | 'schemaVersion', unknown>
+  launchAtLogin: { type: 'boolean' },
+  closeBehavior: { type: 'string' },
+  miniAlwaysOnTop: { type: 'boolean' },
+  hotkeyToggleLast: { type: 'string' },
+  hotkeyShowApp: { type: 'string' },
+  authToken: { type: 'string' },
+  authExpiresAt: { type: 'number' },
+} as const satisfies ValuesSchema &
+  Record<
+    | keyof settings.DeviceSettings
+    | (typeof DESKTOP_VALUE_IDS)[number]
+    | (typeof AUTH_VALUE_IDS)[number]
+    | 'schemaVersion',
+    unknown
+  >
 
 export type SyncedSchemas = [typeof SYNCED_TABLES_SCHEMA, typeof SYNCED_VALUES_SCHEMA]
 export type DeviceSchemas = [typeof DEVICE_TABLES_SCHEMA, typeof DEVICE_VALUES_SCHEMA]
@@ -153,13 +184,26 @@ export interface DeviceValues {
   ringScale?: number
   density?: string
   locale?: string
+  launchAtLogin?: boolean
+  closeBehavior?: string
+  miniAlwaysOnTop?: boolean
+  hotkeyToggleLast?: string
+  hotkeyShowApp?: string
+  authToken?: string
+  authExpiresAt?: number
 }
 
 /** The synced settings as values: every field present, the two structured ones as JSON. */
 export type SyncedSettingsValues = Required<Omit<SyncedValues, 'schemaVersion' | 'seededAt'>>
 
 /** The device settings as values: every field present. */
-export type DeviceSettingsValues = Required<Omit<DeviceValues, 'schemaVersion'>>
+export type DeviceSettingsValues = Required<Pick<DeviceValues, keyof settings.DeviceSettings>>
+
+/** The desktop settings as values: every field present, an unbound hotkey as `''`. */
+export type DesktopSettingsValues = Required<Pick<DeviceValues, (typeof DESKTOP_VALUE_IDS)[number]>>
+
+/** A bearer token as values. */
+export type DeviceAuthValues = Required<Pick<DeviceValues, (typeof AUTH_VALUE_IDS)[number]>>
 
 /** A clock reading: any finite number. */
 function isTime(value: unknown): value is EpochMs {
@@ -482,4 +526,60 @@ export function valuesToDeviceSettings(
   const { schemaVersion, ...fields } = values
   const next = settings.migrateDeviceSettings(fields, storedVersion(schemaVersion))
   return previous !== undefined && sameRow(next, previous) ? previous : next
+}
+
+/** The desktop settings as values to store; an unbound hotkey is `''`. */
+export function desktopSettingsToValues(d: settings.DesktopSettings): DesktopSettingsValues {
+  return {
+    launchAtLogin: d.launchAtLogin,
+    closeBehavior: d.closeBehavior,
+    miniAlwaysOnTop: d.miniAlwaysOnTop,
+    hotkeyToggleLast: d.hotkeys.toggleLast ?? '',
+    hotkeyShowApp: d.hotkeys.showApp ?? '',
+  }
+}
+
+/**
+ * The desktop settings that `values` hold, validated and completed by
+ * `settings.migrateDesktopSettings`: missing and invalid values read as their defaults, and an
+ * empty (or invalid) combo as an unbound hotkey. `previous` comes back when nothing changed, and
+ * its `hotkeys` object when the hotkeys did not.
+ */
+export function valuesToDesktopSettings(
+  values: DeviceValues,
+  previous?: settings.DesktopSettings,
+): settings.DesktopSettings {
+  const next = settings.migrateDesktopSettings(
+    {
+      launchAtLogin: values.launchAtLogin,
+      closeBehavior: values.closeBehavior,
+      miniAlwaysOnTop: values.miniAlwaysOnTop,
+      hotkeys: { toggleLast: values.hotkeyToggleLast, showApp: values.hotkeyShowApp },
+    },
+    storedVersion(values.schemaVersion),
+  )
+  if (previous === undefined) return next
+  const hotkeys = sameRow(next.hotkeys, previous.hotkeys) ? previous.hotkeys : next.hotkeys
+  const merged = Object.freeze({ ...next, hotkeys })
+  return sameRow(merged, previous) ? previous : merged
+}
+
+/** A bearer token as values to store. */
+export function deviceAuthToValues(auth: settings.DeviceAuth): DeviceAuthValues {
+  return { authToken: auth.token, authExpiresAt: auth.expiresAt }
+}
+
+/**
+ * The bearer token that `values` hold, or null when there is none or it is not usable (see
+ * `settings.migrateDeviceAuth`). `previous` comes back when it holds the same token and expiry.
+ */
+export function valuesToDeviceAuth(
+  values: DeviceValues,
+  previous?: settings.DeviceAuth | null,
+): settings.DeviceAuth | null {
+  const next = settings.migrateDeviceAuth({
+    token: values.authToken,
+    expiresAt: values.authExpiresAt,
+  })
+  return next !== null && previous != null && sameRow(next, previous) ? previous : next
 }

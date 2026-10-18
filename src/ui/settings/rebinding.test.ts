@@ -12,6 +12,7 @@ import {
   isCustomized,
   sameCombo,
   sharedShortcuts,
+  shortcutGroups,
   withDefaultShortcut,
   withShortcut,
   withoutShortcut,
@@ -42,6 +43,25 @@ describe('SHORTCUT_GROUPS', () => {
   it('lists the settings shortcut under App', () => {
     const app = SHORTCUT_GROUPS.find((group) => group.actions.includes('palette'))
     expect(app?.actions).toContain('settings')
+  })
+
+  it('lists the mini window after fullscreen where the platform has one', () => {
+    const listed = shortcutGroups([]).flatMap((group) => group.actions)
+    expect([...listed].sort()).toEqual([...keymap.ACTION_IDS].sort())
+    const cards = shortcutGroups([]).find((group) => group.actions.includes('fullscreen'))
+    expect(cards?.actions.slice(cards.actions.indexOf('fullscreen'), -2)).toEqual([
+      'fullscreen',
+      'miniWindow',
+    ])
+  })
+
+  it('counts the mini window as an owner of its key only where it is listed', () => {
+    const t = combo('t')
+    expect(classifyRecording(bindings(), 'newTimer', t, 'other')).toMatchObject({ kind: 'free' })
+    expect(classifyRecording(bindings(), 'newTimer', t, 'other', [])).toMatchObject({
+      kind: 'conflict',
+      owners: ['miniWindow'],
+    })
   })
 })
 

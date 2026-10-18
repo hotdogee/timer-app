@@ -3,10 +3,12 @@
  * grouped rows of the keyboard cheat sheet (spec.md › Shortcuts). Pure; labels come from
  * `keymap.formatCombo`, so they follow the platform (`Ctrl+K` or `⌘K`) and the user's bindings.
  * Section titles and row labels are messages, read when `helpSections` runs, so they follow the
- * active locale; key labels are not translated.
+ * active locale; key labels are not translated. The mini window's row shows only where the
+ * platform has a mini window.
  */
 import { keymap } from '../../core'
 import { m } from '../../i18n'
+import { platform } from '../../platform'
 
 /** A cheat-sheet row: a description and the actions (or fixed keys) that do it. */
 export interface HelpRowSpec {
@@ -42,10 +44,17 @@ export interface HelpSection {
 }
 
 /**
- * What the cheat sheet lists, by group. Every action appears except `miniWindow`, which stays
- * hidden until the mini window ships (M5).
+ * What the cheat sheet lists, by group: every action, the mini window's only when `miniWindow`
+ * (the platform has one: a Tauri window or Document Picture-in-Picture).
  */
-export const HELP_SECTIONS: readonly HelpSectionSpec[] = [
+export function helpSectionSpecs(miniWindow: boolean): readonly HelpSectionSpec[] {
+  return ALL_SECTIONS.map((section) => ({
+    title: section.title,
+    rows: section.rows.filter((row) => miniWindow || !row.actions?.includes('miniWindow')),
+  }))
+}
+
+const ALL_SECTIONS: readonly HelpSectionSpec[] = [
   {
     title: m.help_section_timer,
     rows: [
@@ -74,6 +83,7 @@ export const HELP_SECTIONS: readonly HelpSectionSpec[] = [
       { label: m.help_rename, actions: ['rename'] },
       { label: m.help_mute, actions: ['mute'] },
       { label: m.help_fullscreen, actions: ['fullscreen'] },
+      { label: m.help_mini_window, actions: ['miniWindow'] },
       { label: m.help_delete, actions: ['deleteCard'] },
       { label: m.help_undo, actions: ['undo'] },
     ],
@@ -99,6 +109,11 @@ export const HELP_SECTIONS: readonly HelpSectionSpec[] = [
     ],
   },
 ]
+
+/** The app's cheat sheet: {@link helpSectionSpecs} for this platform. */
+export const HELP_SECTIONS: readonly HelpSectionSpec[] = helpSectionSpecs(
+  platform.windows.supported,
+)
 
 /** The parsable combos bound to `action`, in binding order. */
 function combosOf(

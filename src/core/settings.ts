@@ -1,9 +1,15 @@
 /**
  * Settings: the types, defaults and validation of every user setting (spec.md › Settings), split
- * into two groups. Device settings (appearance and language) stay on one device; synced settings
- * (behavior and the keymap) follow the account. Pure: no DOM, no storage. The settings store in
- * `src/state` validates everything it reads and writes through {@link migrateDeviceSettings} and
- * {@link migrateSyncedSettings}.
+ * into groups. Device settings (appearance and language) stay on one device; synced settings
+ * (behavior and the keymap) follow the account. The desktop app adds two more device-only groups:
+ * the desktop settings (launch at login, close behavior, the mini window, global hotkeys) and the
+ * desktop sign-in's bearer token. Pure: no DOM, no storage. The settings store in `src/state`
+ * validates everything it reads and writes through {@link migrateDeviceSettings},
+ * {@link migrateSyncedSettings}, {@link migrateDesktopSettings} and {@link migrateDeviceAuth}.
+ *
+ * The desktop and auth groups are kept apart from {@link DeviceSettings} on purpose: the export
+ * file (Settings › Data) carries the device settings, and neither this machine's hotkeys nor its
+ * token may travel in a file or be overwritten by importing one.
  *
  * Validation never throws and always yields a complete settings object: unknown fields are
  * dropped, a field of the wrong type or an unknown choice falls back to its default, and a number
@@ -13,7 +19,7 @@
 import * as v from 'valibot'
 
 import { ACTION_IDS, DEFAULT_BINDINGS, parseCombo, type ActionId, type Bindings } from './keymap'
-import type { Ms, TimeStyle } from './types'
+import type { EpochMs, Ms, TimeStyle } from './types'
 
 export type { TimeStyle } from './types'
 
@@ -36,6 +42,26 @@ export const TIME_STYLES: readonly TimeStyle[] = Object.freeze(['compact', 'fixe
 export const SOUND_IDS: readonly SoundId[] = Object.freeze(['chime', 'bell', 'beep'])
 /** The languages the app ships, the base language (`'en'`) first. */
 export const LOCALES: readonly Locale[] = Object.freeze(['en', 'zh-TW', 'ja'])
+
+/**
+ * What closing the desktop app's main window does (spec Q11): hide it to the tray while a timer
+ * runs or rings and quit otherwise, always hide it to the tray, or always quit.
+ */
+export type CloseBehavior = 'tray-while-running' | 'tray' | 'quit'
+/** Every {@link CloseBehavior}, in display order. Frozen. */
+export const CLOSE_BEHAVIORS: readonly CloseBehavior[] = Object.freeze([
+  'tray-while-running',
+  'tray',
+  'quit',
+])
+
+/**
+ * A global hotkey of the desktop app: start or pause the last-used card, and show or hide the
+ * app. Global hotkeys work while another app has the focus.
+ */
+export type HotkeyId = 'toggleLast' | 'showApp'
+/** Every {@link HotkeyId}, in display order. Frozen. */
+export const HOTKEY_IDS: readonly HotkeyId[] = Object.freeze(['toggleLast', 'showApp'])
 
 /** The user's changes to the default shortcuts: replacement combos per action. */
 export type KeymapOverrides = Readonly<Partial<Record<ActionId, readonly string[]>>>
@@ -80,7 +106,47 @@ export interface SyncedSettings {
   readonly keymap: KeymapOverrides
 }
 
-/** The current version of both settings groups' shape; stored next to them. */
+/**
+ * The global hotkeys' combos in the keymap's portable binding text (`'Mod+Shift+Space'`), or null
+ * when unbound. Both are unbound by default: global hotkeys are opt-in (spec › Keyboard).
+ */
+export type DesktopHotkeys = Readonly<Record<HotkeyId, string | null>>
+
+/** The desktop app's settings (Settings › Desktop): per machine, never synced or exported. */
+export interface DesktopSettings {
+  /** Whether the app starts, hidden to the tray, when the user logs in to the OS. */
+  readonly launchAtLogin: boolean
+  readonly closeBehavior: CloseBehavior
+  /** Whether the mini window floats above other apps. */
+  readonly miniAlwaysOnTop: boolean
+  readonly hotkeys: DesktopHotkeys
+}
+
+/**
+ * A change to some desktop settings: any top-level field, and any of the hotkeys (the others keep
+ * their combos). See {@link updateDesktopSettings}.
+ */
+export type DesktopSettingsUpdate = Partial<Omit<DesktopSettings, 'hotkeys'>> & {
+  readonly hotkeys?: Partial<DesktopHotkeys>
+}
+
+/**
+ * The desktop sign-in's bearer token (spec › Sync › Desktop sign-in): the desktop app has no
+ * session cookie, so it keeps the token the device-authorization flow returned, on this machine
+ * only, until it signs out or the token expires.
+ */
+export interface DeviceAuth {
+  /** The session token, sent as `Authorization: Bearer <token>` and in the sync subprotocol. */
+  readonly token: string
+  /** When the session expires: epoch milliseconds. */
+  readonly expiresAt: EpochMs
+}
+
+/**
+ * The current version of the settings groups' shape; stored next to them. The desktop and auth
+ * groups came later as new values of their own, so data without them simply reads as their
+ * defaults and needed no new version.
+ */
 export const SETTINGS_SCHEMA_VERSION = 1
 
 /** A numeric setting's bounds and the step a control should use. */
@@ -130,6 +196,17 @@ export const SYNCED_DEFAULTS: SyncedSettings = Object.freeze({
   confirmDelete: false,
   keymap: Object.freeze({}),
 })
+
+/** The desktop settings of a new install: no autostart, Q11's close behavior, no hotkeys. */
+export const DESKTOP_DEFAULTS: DesktopSettings = Object.freeze({
+  launchAtLogin: false,
+  closeBehavior: 'tray-while-running',
+  miniAlwaysOnTop: true,
+  hotkeys: Object.freeze({ toggleLast: null, showApp: null }),
+})
+
+/** The longest bearer token kept; Better Auth's session tokens are far shorter. */
+export const MAX_AUTH_TOKEN_LENGTH = 4096
 
 /** Whether `value` is one of {@link LOCALES}. */
 export function isLocale(value: unknown): value is Locale {
@@ -259,6 +336,37 @@ const syncedSchema = v.object({
   keymap: v.fallback(v.pipe(v.unknown(), v.transform(cleanKeymap)), NO_OVERRIDES),
 })
 
+/**
+ * A global hotkey's combo: binding text that parses (`keymap.parseCombo`), at most
+ * {@link MAX_COMBO_LENGTH} characters, kept as written; anything else, blank text included, is
+ * null (unbound).
+ */
+function hotkeyCombo(input: unknown): string | null {
+  return typeof input === 'string' &&
+    input.trim() !== '' &&
+    input.length <= MAX_COMBO_LENGTH &&
+    parseCombo(input, 'other') !== null
+    ? input
+    : null
+}
+
+const hotkey = v.fallback(v.pipe(v.unknown(), v.transform(hotkeyCombo)), null)
+
+const desktopSchema = v.object({
+  launchAtLogin: v.fallback(v.boolean(), DESKTOP_DEFAULTS.launchAtLogin),
+  closeBehavior: v.fallback(v.picklist(CLOSE_BEHAVIORS), DESKTOP_DEFAULTS.closeBehavior),
+  miniAlwaysOnTop: v.fallback(v.boolean(), DESKTOP_DEFAULTS.miniAlwaysOnTop),
+  hotkeys: v.fallback(v.object({ toggleLast: hotkey, showApp: hotkey }), DESKTOP_DEFAULTS.hotkeys),
+})
+
+/** Visible ASCII only: a token travels in HTTP headers and is percent-encoded for a subprotocol. */
+const TOKEN_PATTERN = /^[\x21-\x7e]+$/
+
+const authSchema = v.object({
+  token: v.pipe(v.string(), v.maxLength(MAX_AUTH_TOKEN_LENGTH), v.regex(TOKEN_PATTERN)),
+  expiresAt: v.pipe(v.number(), v.finite(), v.gtValue(0)),
+})
+
 /** One upgrade step: settings data of version `n` in, data of version `n + 1` out. */
 export type SettingsMigration = (data: unknown) => unknown
 
@@ -268,6 +376,7 @@ export type SettingsMigration = (data: unknown) => unknown
  */
 const DEVICE_MIGRATIONS: readonly SettingsMigration[] = []
 const SYNCED_MIGRATIONS: readonly SettingsMigration[] = []
+const DESKTOP_MIGRATIONS: readonly SettingsMigration[] = []
 
 /**
  * Brings settings data of `version` up to the latest version (`steps.length + 1`) by running every
@@ -306,4 +415,45 @@ export function migrateDeviceSettings(input: unknown, version?: number): DeviceS
 export function migrateSyncedSettings(input: unknown, version?: number): SyncedSettings {
   const output = v.parse(syncedSchema, fields(runMigrations(input, version, SYNCED_MIGRATIONS)))
   return Object.freeze({ ...output, quickAdd: Object.freeze(output.quickAdd) })
+}
+
+/**
+ * Validates desktop settings from anywhere (storage, an update spread over the current settings),
+ * as {@link migrateDeviceSettings} does: unknown fields are dropped, and each field of the wrong
+ * type or an unknown choice falls back to its default. A hotkey whose combo does not parse (or is
+ * blank, or longer than 64 characters) reads as unbound. Never throws; the result is frozen, its
+ * `hotkeys` too. Data from before the desktop group existed has none of its fields, so it reads
+ * as {@link DESKTOP_DEFAULTS}.
+ */
+export function migrateDesktopSettings(input: unknown, version?: number): DesktopSettings {
+  const output = v.parse(desktopSchema, fields(runMigrations(input, version, DESKTOP_MIGRATIONS)))
+  return Object.freeze({ ...output, hotkeys: Object.freeze(output.hotkeys) })
+}
+
+/**
+ * `current` with `update` applied: top-level fields replace their values, and `update.hotkeys`
+ * replaces only the hotkeys it names. Validated like {@link migrateDesktopSettings}.
+ */
+export function updateDesktopSettings(
+  current: DesktopSettings,
+  update: DesktopSettingsUpdate,
+): DesktopSettings {
+  return migrateDesktopSettings({
+    ...current,
+    ...update,
+    hotkeys: { ...current.hotkeys, ...update.hotkeys },
+  })
+}
+
+/**
+ * Validates a stored bearer token: a non-empty string of visible ASCII characters, at most
+ * {@link MAX_AUTH_TOKEN_LENGTH} long, with a positive finite `expiresAt`. Returns null when either
+ * field is missing or invalid (there is no default token). Expiry is not checked here (this module
+ * reads no clock): compare `expiresAt` with the current time before using the token. Never throws;
+ * the result is frozen and carries only those two fields.
+ */
+export function migrateDeviceAuth(input: unknown): DeviceAuth | null {
+  const result = v.safeParse(authSchema, fields(input))
+  if (!result.success) return null
+  return Object.freeze({ token: result.output.token, expiresAt: result.output.expiresAt })
 }

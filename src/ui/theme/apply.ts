@@ -17,10 +17,17 @@
  * themes again only when the seed changes, so the app calls it from an effect on every device
  * settings change. CJK text gets the fonts of the page's language through `--font-cjk`
  * (see {@link FONT_STACKS}), and every stack ends in `sans-serif`.
+ *
+ * The seed setting `''` follows the platform's accent color (desktop, spec Q20): the document
+ * remembers the accent last given ({@link applyDefaultSeed}, or `defaultSeed`), and
+ * {@link followAccent} keeps it in step with the OS. For the page's own document the accent in use
+ * is also reactive state (`defaultSeedState`), which Settings › Appearance shows.
  */
 import type { settings } from '../../core'
+import type { AccentSource } from '../../platform/accent'
+import { defaultSeedState } from './default-seed.svelte'
 import { DEFAULT_THEME_CSS } from './default-theme'
-import { DEFAULT_SEED, parseSeed } from './seed'
+import { DEFAULT_SEED, parseSeed, resolveSeed } from './seed'
 import { writeThemeStyle, type ThemeDocument } from './style'
 
 /**
@@ -47,8 +54,9 @@ export interface SchemeModule {
 /** Options for {@link applyAppearance}. */
 export interface AppearanceOptions {
   /**
-   * The seed when the setting is `''` (the default): the platform accent color once there is one
-   * (desktop, M5). Invalid or missing: {@link DEFAULT_SEED}.
+   * The seed when the setting is `''` (the default): the platform accent color (desktop). Invalid
+   * or null: {@link DEFAULT_SEED}. Left out, the one last given for this document stays (see
+   * {@link applyDefaultSeed}).
    */
   readonly defaultSeed?: string | null | undefined
   /** Loads the scheme generator. Defaults to importing `./scheme`; tests may slow it down. */
@@ -68,6 +76,10 @@ interface Applied {
   /** The theme's page colors, once the theme is on the page. */
   colors: PageColors | null
   mode: settings.ThemeMode
+  /** The seed setting last applied; null before the first call. */
+  deviceSeed: string | null
+  /** The seed for the setting `''`: the accent last given, or null for {@link DEFAULT_SEED}. */
+  defaultSeed: string | null
   /** Bumped for each new theme, so a slow one that finishes late is dropped. */
   request: number
   /** Settles when the latest theme is on the page. */
@@ -99,10 +111,29 @@ const appliedByDocument = new WeakMap<object, Applied>()
 function appliedTo(doc: AppearanceDocument): Applied {
   let applied = appliedByDocument.get(doc)
   if (applied === undefined) {
-    applied = { seed: null, colors: null, mode: 'system', request: 0, done: Promise.resolve() }
+    applied = {
+      seed: null,
+      colors: null,
+      mode: 'system',
+      deviceSeed: null,
+      defaultSeed: null,
+      request: 0,
+      done: Promise.resolve(),
+    }
     appliedByDocument.set(doc, applied)
   }
   return applied
+}
+
+/**
+ * Records `defaultSeed` as the page's accent in use ({@link defaultSeedState}) when `doc` is the
+ * page's own document: lowercase, or null for none (or Google blue, the default anyway).
+ */
+function showDefaultSeed(doc: AppearanceDocument, defaultSeed: string | null): void {
+  if (typeof document === 'undefined' || doc !== document) return
+  const seed = typeof defaultSeed === 'string' ? parseSeed(defaultSeed) : null
+  const current = seed === NORMALIZED_DEFAULT_SEED ? null : seed
+  if (defaultSeedState.current !== current) defaultSeedState.current = current
 }
 
 /** The seed to theme with: the setting, else `defaultSeed`, else the default; lowercase. */
@@ -200,11 +231,67 @@ export function applyAppearance(
 
   const applied = appliedTo(doc)
   applied.mode = mode ?? 'system'
-  const seed = themeSeed(device.seed, options.defaultSeed)
+  applied.deviceSeed = device.seed
+  if (options.defaultSeed !== undefined) {
+    applied.defaultSeed = options.defaultSeed
+    showDefaultSeed(doc, options.defaultSeed)
+  }
+  const seed = themeSeed(device.seed, applied.defaultSeed)
   if (seed !== applied.seed) {
     theme(doc, applied, seed, options.loadScheme ?? loadDefaultScheme)
   } else if (applied.colors !== null) {
     writeMetas(doc, applied.colors, applied.mode)
   }
   return applied.done
+}
+
+/**
+ * Makes `defaultSeed` (the OS accent color; null for none) the seed of `doc` for the seed setting
+ * `''`, and themes again at once when the page follows it, as {@link applyAppearance} would with
+ * the same settings. Before the first {@link applyAppearance} on `doc` it only remembers the
+ * seed. The promise settles once the theme is on the page; it never rejects.
+ */
+export function applyDefaultSeed(
+  defaultSeed: string | null,
+  doc: AppearanceDocument = document,
+  options: Pick<AppearanceOptions, 'loadScheme'> = {},
+): Promise<void> {
+  const applied = appliedTo(doc)
+  applied.defaultSeed = defaultSeed
+  showDefaultSeed(doc, defaultSeed)
+  if (applied.deviceSeed === null) return applied.done
+  const seed = themeSeed(applied.deviceSeed, defaultSeed)
+  if (seed !== applied.seed) theme(doc, applied, seed, options.loadScheme ?? loadDefaultScheme)
+  return applied.done
+}
+
+/**
+ * Follows the platform's accent color as the default seed of `doc` (desktop, spec Q20): resolves
+ * once the accent is known, or after `timeoutMs`, whichever comes first, so startup can wait for
+ * it before the first paint without a slow OS delaying the app (see `resolveSeed`). An accent that
+ * arrives later, and every change the OS reports afterwards (`AccentSource.onChange`), re-themes
+ * the page through {@link applyDefaultSeed}. Resolves to the function that stops following.
+ */
+export async function followAccent(
+  source: AccentSource,
+  timeoutMs: number,
+  doc: AppearanceDocument = document,
+  options: Pick<AppearanceOptions, 'loadScheme'> = {},
+): Promise<() => void> {
+  /** Set by the first change, so a first answer that arrives after it cannot undo it. */
+  let changed = false
+  const stop =
+    source.onChange?.((accent) => {
+      changed = true
+      void applyDefaultSeed(accent, doc, options)
+    }) ?? (() => undefined)
+  const seed = await resolveSeed(
+    () => source.get(),
+    timeoutMs,
+    (late) => {
+      if (!changed) void applyDefaultSeed(late, doc, options)
+    },
+  )
+  if (!changed) void applyDefaultSeed(seed, doc, options)
+  return stop
 }

@@ -50,3 +50,38 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+  rust:
+    name: Desktop shell (Rust, Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      # No web build: a plain cargo build of the shell is a development build (no `custom-protocol`
+      # feature), which serves the page from the dev server and never reads dist/. M6's
+      # `tauri build` builds the web app first.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # cargo-audit, prebuilt: RustSec advisories fail the job (accepted ones, with their reasons,
+      # are in src-tauri/.cargo/audit.toml).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      # The release profile too: it leaves out the debug-only smoke hook (module, command, grant).
+      - run: cargo clippy --release --all-targets -- -D warnings
+      - run: cargo test
+      - run: cargo audit

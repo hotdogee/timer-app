@@ -7,6 +7,7 @@ import {
   SECTION_IDS,
   isSectionId,
   sectionTitle,
+  sectionsFor,
   tabId,
   tabKeyTarget,
 } from './sections'
@@ -21,6 +22,7 @@ describe('sections', () => {
       'appearance',
       'behavior',
       'keyboard',
+      'desktop',
       'presets',
       'data',
       'account',
@@ -29,11 +31,18 @@ describe('sections', () => {
     expect(Object.isFrozen(SECTION_IDS)).toBe(true)
   })
 
+  it('lists Desktop only in the desktop app', () => {
+    expect(sectionsFor('tauri')).toEqual(SECTION_IDS)
+    expect(sectionsFor('web')).toEqual(SECTION_IDS.filter((id) => id !== 'desktop'))
+    expect(Object.isFrozen(sectionsFor('web'))).toBe(true)
+  })
+
   it('titles each section in the active locale', () => {
     expect(SECTION_IDS.map(sectionTitle)).toEqual([
       'Appearance',
       'Behavior',
       'Keyboard',
+      'Desktop',
       'Presets',
       'Data',
       'Account',
@@ -42,6 +51,7 @@ describe('sections', () => {
     setAppLocale('zh-TW')
     expect(sectionTitle('presets')).toBe('預設集')
     expect(sectionTitle('account')).toBe('帳號')
+    expect(sectionTitle('desktop')).toBe('桌面版')
   })
 
   it('has an icon with path data for each section', () => {
@@ -51,7 +61,8 @@ describe('sections', () => {
   it('recognizes section ids', () => {
     expect(isSectionId('keyboard')).toBe(true)
     expect(isSectionId('account')).toBe(true)
-    expect(isSectionId('desktop')).toBe(false)
+    expect(isSectionId('desktop')).toBe(true)
+    expect(isSectionId('mini')).toBe(false)
     expect(isSectionId(undefined)).toBe(false)
   })
 

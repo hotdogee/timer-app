@@ -8,6 +8,7 @@ import {
   insideDialog,
   isActivatable,
   isTextEntry,
+  lastToggledCard,
   ownsArrows,
   type KeyboardDeps,
   type KeyboardEventLike,
@@ -982,6 +983,95 @@ describe('typed digits follow the selection', () => {
     s.press('m')
     s.press('k', { ctrl: true })
     expect(s.typed()).toBe('3')
+  })
+})
+
+describe('toggleLast (the global hotkey and the tray)', () => {
+  it('starts and pauses the selected card when no card was used yet', () => {
+    const s = withTimer()
+    s.controller.toggleLast()
+    expect(s.timerState()).toEqual({
+      phase: 'running',
+      duration: 5 * MINUTE,
+      endsAt: NOW + 5 * MINUTE,
+    })
+    expect(s.onStart).toHaveBeenCalledWith('id1')
+    s.setNow(NOW + MINUTE)
+    s.controller.toggleLast()
+    expect(s.timerState()).toEqual({ phase: 'paused', duration: 5 * MINUTE, remaining: 4 * MINUTE })
+  })
+
+  it('keeps acting on the card it toggled after the selection moved', () => {
+    const s = withTimer()
+    s.store.addStopwatch()
+    s.store.select('id2')
+    s.controller.toggleLast()
+    expect(s.stopwatchState('id2')?.phase).toBe('running')
+    s.store.select('id1')
+    s.controller.toggleLast()
+    expect(s.stopwatchState('id2')?.phase).toBe('paused')
+    expect(s.timerState('id1')?.phase).toBe('idle')
+  })
+
+  it('ignores typed digits and dismisses a ringing timer', () => {
+    const s = withTimer()
+    s.store.timer('id1', timer.start)
+    s.store.settle(NOW + 6 * MINUTE)
+    expect(s.timerState()?.phase).toBe('ringing')
+    s.controller.toggleLast()
+    expect(s.timerState()).toEqual({ phase: 'idle', duration: 5 * MINUTE })
+
+    s.type('3')
+    s.controller.toggleLast()
+    expect(s.timerState()).toEqual({
+      phase: 'running',
+      duration: 5 * MINUTE,
+      endsAt: NOW + 5 * MINUTE,
+    })
+  })
+
+  it('falls back to the selected card when the last-used one was deleted, and to nothing', () => {
+    const s = withTimer()
+    s.store.addTimer()
+    s.controller.toggleLast() // id2, selected
+    s.store.remove('id2')
+    s.controller.toggleLast()
+    expect(s.timerState('id1')?.phase).toBe('running')
+    s.store.remove('id1')
+    expect(() => {
+      s.controller.toggleLast()
+    }).not.toThrow()
+    expect(s.store.cards).toEqual([])
+  })
+})
+
+describe('lastToggledCard', () => {
+  it('finds the card that started, resumed or paused, and nothing for other changes', () => {
+    const s = withTimer()
+    s.store.addStopwatch()
+    const idle = s.store.list
+    s.store.timer('id1', timer.start)
+    const started = s.store.list
+    expect(lastToggledCard(idle, started)).toBe('id1')
+    expect(lastToggledCard(started, started)).toBeNull()
+    s.store.rename('id1', 'Tea')
+    expect(lastToggledCard(started, s.store.list)).toBeNull()
+    const renamed = s.store.list
+    s.store.timer('id1', timer.pause)
+    expect(lastToggledCard(renamed, s.store.list)).toBe('id1')
+    const paused = s.store.list
+    s.store.timer('id1', timer.reset)
+    expect(lastToggledCard(paused, s.store.list)).toBeNull()
+    s.store.stopwatch('id2', stopwatch.start)
+    expect(lastToggledCard(paused, s.store.list)).toBe('id2')
+  })
+
+  it('counts a card that arrives running, and takes the last in grid order', () => {
+    const s = withTimer()
+    s.store.addTimer()
+    s.store.timer('id1', timer.start)
+    s.store.timer('id2', timer.start)
+    expect(lastToggledCard(cards.EMPTY_LIST, s.store.list)).toBe('id2')
   })
 })
 

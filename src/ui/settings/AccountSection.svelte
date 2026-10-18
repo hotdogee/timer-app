@@ -14,6 +14,11 @@
   While the session is unknown it says "Checking your account…", for a few seconds at most (then
   the server is out of reach, and the sign-in form shows; trying it says so).
 
+  On desktop (`desktop`, the Tauri app) signing in goes through the browser first
+  (`DeviceSignIn`: a code to approve on the `/device` page; providers refuse embedded webviews, so
+  their buttons are hidden), with the emailed code below it; once the code is approved, focus
+  moves to the signed-in summary as after the emailed code. Links open in the system browser.
+
   `auth` is the app's auth state (`authStore`), `sync` the sync controller (`remoteSync`; null when
   there is none), `syncPreference` this device's sync switch (null hides it). `now` is the app
   clock, for "Synced 5 minutes ago".
@@ -27,11 +32,15 @@
 
   import type { Clock } from '../../core'
   import { localeState, m } from '../../i18n'
+  import { platform } from '../../platform'
   import { appClock } from '../../state/app-clock'
+  import { bearerToken } from '../../state/auth.svelte'
   import type { SyncPreference } from '../../state/sync-preference.svelte'
   import DeleteAccountDialog from '../account/DeleteAccountDialog.svelte'
   import { authErrorMessage, sentences, serverCopyErrorMessage } from '../account/errors'
   import { checkingPatience } from '../account/checking.svelte'
+  import DeviceSignIn from '../account/DeviceSignIn.svelte'
+  import { externalLinkClick } from '../account/links'
   import { PRIVACY_POLICY_URL } from '../account/privacy'
   import { ServerCopyError, downloadServerCopy as saveServerCopy } from '../account/server-copy'
   import SignInForm from '../account/SignInForm.svelte'
@@ -55,6 +64,8 @@
     now?: Clock
     /** Downloads and saves the server copy; resolves to the file name. */
     downloadServerCopy?: () => Promise<string>
+    /** The desktop app: sign in through the browser, no provider buttons. */
+    desktop?: boolean
   }
 
   let {
@@ -62,7 +73,8 @@
     sync = null,
     syncPreference = null,
     now = appClock,
-    downloadServerCopy = () => saveServerCopy(),
+    downloadServerCopy = () => saveServerCopy({ token: bearerToken() }),
+    desktop = platform.kind === 'tauri',
   }: Props = $props()
 
   /** How often "Synced 5 minutes ago" is brought up to date while the section shows. */
@@ -127,7 +139,8 @@
       return
     }
     focusSignIn = true
-    announce(m.account_signed_out())
+    // Desktop, with the server out of reach: signed out here; the session there just expires.
+    announce(signedOut === 'device-only' ? m.account_signed_out_device() : m.account_signed_out())
   }
 
   async function saveCopy() {
@@ -147,6 +160,31 @@
     }
   }
 
+  /**
+   * Set while a desktop sign-in through the browser waits for approval, so its success moves focus
+   * to the summary and is announced, as the emailed code's is.
+   */
+  let viaBrowser = false
+  $effect(() => {
+    if (auth.device?.phase === 'waiting') {
+      viaBrowser = true
+      return
+    }
+    if (user === null) {
+      viaBrowser = false
+      return
+    }
+    if (!viaBrowser) return
+    viaBrowser = false
+    focusSummary = true
+    const email = user.email
+    untrack(() => {
+      announce(m.account_signed_in_as({ email }))
+    })
+  })
+
+  const privacyClick = $derived(externalLinkClick(PRIVACY_POLICY_URL, desktop))
+
   function deleted() {
     failure = ''
     result = ''
@@ -165,16 +203,25 @@
       <p class="lead">{m.account_intro()}</p>
       <p class="secondary">{m.account_intro_detail()}</p>
     </div>
-    <SignInForm
-      {auth}
-      autofocus={focusSignIn}
-      onsignedin={() => {
-        focusSignIn = false
-        focusSummary = true
-      }}
-    />
+    {#if desktop}
+      <DeviceSignIn {auth} />
+    {/if}
+    {#if !desktop || auth.device?.phase !== 'waiting'}
+      {#if desktop}
+        <div class="divider"><span>{m.account_device_email()}</span></div>
+      {/if}
+      <SignInForm
+        {auth}
+        autofocus={focusSignIn}
+        providers={!desktop}
+        onsignedin={() => {
+          focusSignIn = false
+          focusSummary = true
+        }}
+      />
+    {/if}
     <p class="privacy">
-      <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
+      <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer" onclick={privacyClick}>
         {m.account_privacy()}
         <span class="external"><Glyph name="open_in_new" /></span>
       </a>
@@ -354,6 +401,23 @@
     line-height: 1.5rem;
   }
 
+  /* "or sign in with an emailed code" between two rules (desktop). */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    color: var(--md-sys-color-on-surface-variant);
+    font-size: 0.875rem;
+    text-align: center;
+  }
+
+  .divider::before,
+  .divider::after {
+    content: '';
+    flex: 1;
+    border-block-start: 1px solid var(--md-sys-color-outline-variant);
+  }
+
   .privacy a {
     display: inline-flex;
     align-items: center;
@@ -490,6 +554,11 @@
   @media (forced-colors: active) {
     .initial {
       border: 1px solid CanvasText;
+    }
+
+    .divider::before,
+    .divider::after {
+      border-color: CanvasText;
     }
   }
 </style>

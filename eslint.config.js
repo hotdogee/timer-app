@@ -31,7 +31,8 @@ export default defineConfig(
   svelte.configs.recommended,
   {
     languageOptions: {
-      globals: { ...globals.browser },
+      // Plus the build constants vite.config.ts defines (declared in src/vite-env.d.ts).
+      globals: { ...globals.browser, __APP_VERSION__: 'readonly', __DESKTOP__: 'readonly' },
       parserOptions: {
         projectService: {
           // Root config files are outside tsconfig.json; type them with tsconfig.node.json.
@@ -56,6 +57,15 @@ export default defineConfig(
   {
     // Root config files and Playwright tests run in Node (e2e/ is typed by e2e/tsconfig.json).
     files: ['*.js', '*.ts', 'e2e/**/*.ts'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
+  {
+    // Developer scripts (the desktop smoke test): plain Node ES modules outside every TypeScript
+    // project, linted without type information.
+    files: ['scripts/**/*.mjs'],
+    extends: [ts.configs.disableTypeChecked],
     languageOptions: {
       globals: { ...globals.node },
     },

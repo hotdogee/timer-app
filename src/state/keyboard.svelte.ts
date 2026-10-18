@@ -14,6 +14,11 @@
  * Typed digits belong to the selected timer while it is not running. When the selection or the
  * selected card's phase changes some other way (a click, a button, the alarm), the digits are
  * dropped, so they never apply to a different card or a running timer.
+ *
+ * The controller also remembers the last-used card, the one most recently started, resumed or
+ * paused by any means (a key, a button, the palette, the mini window, another tab), for the desktop
+ * app's global hotkey and tray command "Start or pause the last card" ({@link
+ * KeyboardController.toggleLast}).
  */
 import { untrack } from 'svelte'
 
@@ -44,7 +49,7 @@ export interface AppActions {
   startRename(id: cards.CardId): void
   /** Shows card `id` fullscreen, or leaves fullscreen. */
   toggleFullscreen(id: cards.CardId): void
-  /** Opens card `id` in the always-on-top mini window (a no-op until M5). */
+  /** Opens card `id` in the always-on-top mini window (where the platform has one). */
   miniWindow(id: cards.CardId): void
   /** Opens the timer presets (the action bar's "+ Timer" menu). */
   openPresets(): void
@@ -98,6 +103,13 @@ export interface KeyboardEventLike extends keymap.KeyEventLike {
 export interface KeyboardController {
   /** The window `keydown` handler: `<svelte:window onkeydown={keyboard.handleKeydown} />`. */
   readonly handleKeydown: (event: KeyboardEventLike) => void
+  /**
+   * Starts or pauses the last-used card (the one most recently started, resumed or paused, else
+   * the selected one) as Space would, but without typed digits: it starts an idle card, pauses a
+   * running one, resumes a paused one and dismisses a ringing timer. For the desktop app's global
+   * hotkey and tray command, which act without focusing the window (spec › Keyboard).
+   */
+  readonly toggleLast: () => void
   /** Stops watching the selection. Call it when the app unmounts. */
   readonly destroy: () => void
 }
@@ -277,7 +289,34 @@ interface Snapshot {
 
 function snapshotOf(card: cards.Card | undefined): Snapshot {
   if (card === undefined) return { id: null, phase: null }
-  return { id: card.id, phase: card.kind === 'timer' ? card.timer.phase : card.stopwatch.phase }
+  return { id: card.id, phase: phaseOf(card) }
+}
+
+function phaseOf(card: cards.Card): TimerPhase | StopwatchPhase {
+  return card.kind === 'timer' ? card.timer.phase : card.stopwatch.phase
+}
+
+/**
+ * The card that `after` started, resumed or paused compared with `before`: one whose phase became
+ * running or paused (the last such in grid order when several did, as an import or a sync may
+ * do), or null when none did. A card that arrives already running counts as started.
+ */
+export function lastToggledCard(
+  before: cards.CardList,
+  after: cards.CardList,
+): cards.CardId | null {
+  if (before === after) return null
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- a local, never read reactively
+  const old = new Map(before.cards.map((card) => [card.id, card]))
+  let found: cards.CardId | null = null
+  for (const card of after.cards) {
+    const phase = phaseOf(card)
+    if (phase !== 'running' && phase !== 'paused') continue
+    const previous = old.get(card.id)
+    if (previous === card) continue
+    if (previous === undefined || phaseOf(previous) !== phase) found = card.id
+  }
+  return found
 }
 
 /** Whether digits typed now would edit `card`: a timer that is not running. */
@@ -474,6 +513,22 @@ export function createKeyboardController(deps: KeyboardDeps): KeyboardController
     reconcile()
   }
 
+  /** The card most recently started, resumed or paused since the controller was created. */
+  let lastUsed: cards.CardId | null = null
+  let watchedList = untrack(() => store.list)
+
+  /** See {@link KeyboardController.toggleLast}. */
+  function toggleLast(): void {
+    const list = untrack(() => store.list)
+    const card =
+      (lastUsed === null ? undefined : cards.findCard(list, lastUsed)) ??
+      (list.selectedId === null ? undefined : cards.findCard(list, list.selectedId))
+    if (card === undefined) return
+    lastUsed = card.id
+    if (card.kind === 'stopwatch') store.stopwatch(card.id, stopwatch.toggle)
+    else toggleTimer(store, card.id, digits.EMPTY, deps.onStart)
+  }
+
   // Selection and phase changes made elsewhere (clicks, buttons, the alarm) drop typed digits
   // right away, so a card never shows digits that would not apply to it.
   const stopWatching = $effect.root(() => {
@@ -481,11 +536,20 @@ export function createKeyboardController(deps: KeyboardDeps): KeyboardController
       void store.selected
       untrack(reconcile)
     })
+    // Every start, resume and pause, wherever it came from, makes that card the last used.
+    $effect(() => {
+      const list = store.list
+      untrack(() => {
+        lastUsed = lastToggledCard(watchedList, list) ?? lastUsed
+        watchedList = list
+      })
+    })
   })
 
   let destroyed = false
   return {
     handleKeydown,
+    toggleLast,
     destroy: () => {
       if (destroyed) return
       destroyed = true

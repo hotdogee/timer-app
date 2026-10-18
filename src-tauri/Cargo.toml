@@ -17,6 +17,26 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
-tauri = { version = "2.12.4", features = [] }
+tauri = { version = "2.12.4", features = ["image-png", "tray-icon"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+tauri-plugin-notification = "2.7.0"
+tauri-plugin-process = "2.4.0"
+tauri-plugin-opener = "2.7.2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-autostart = "2.7.0"
+tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-single-instance = "2.5.4"
+tauri-plugin-updater = "2.14.0"
+tauri-plugin-window-state = "2.5.0"
+
+[target."cfg(windows)".dependencies]
+windows = { version = "0.62.2", features = ["UI_ViewManagement", "Foundation", "Win32_System_Registry"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSColor", "NSColorSpace", "objc2-core-foundation"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "settings"] }

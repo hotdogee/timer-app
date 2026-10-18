@@ -16,6 +16,7 @@ import {
   type AuthPage,
   type AuthResult,
   type SessionReport,
+  type SignIn,
 } from './auth.svelte'
 
 const ANN: AccountUser = { id: 'u1', email: 'ann@example.com', name: 'Ann', image: null }
@@ -38,7 +39,7 @@ function fakeBackend(overrides: Partial<AuthBackend> = {}) {
     refreshSession: vi.fn(() => Promise.resolve()),
     sendCode: vi.fn(() => Promise.resolve(OK)),
     verifyCode: vi.fn(() =>
-      Promise.resolve<AuthResult<AccountUser | null>>({ ok: true, value: ANN }),
+      Promise.resolve<AuthResult<SignIn>>({ ok: true, value: { user: ANN, token: 'tok-ann' } }),
     ),
     signInSocial: vi.fn(() => Promise.resolve(OK)),
     signOut: vi.fn(() => Promise.resolve(OK)),
@@ -237,7 +238,7 @@ describe('createAuthStore', () => {
   it('checks the session when a sign-in answer has no user', async () => {
     const { backend, mocks } = fakeBackend({
       verifyCode: vi.fn(() =>
-        Promise.resolve<AuthResult<AccountUser | null>>({ ok: true, value: null }),
+        Promise.resolve<AuthResult<SignIn>>({ ok: true, value: { user: null, token: null } }),
       ),
     })
     const store = createAuthStore({ backend, cache: null, page: null })
@@ -248,7 +249,7 @@ describe('createAuthStore', () => {
   it('keeps a wrong code signed out', async () => {
     const { backend } = fakeBackend({
       verifyCode: vi.fn(() =>
-        Promise.resolve<AuthResult<AccountUser | null>>({ ok: false, error: 'invalid-code' }),
+        Promise.resolve<AuthResult<SignIn>>({ ok: false, error: 'invalid-code' }),
       ),
     })
     const store = createAuthStore({ backend, cache: null, page: null })
@@ -553,7 +554,10 @@ describe('createBetterAuthBackend', () => {
     const { backend, requests } = setup(() => json({ token: 'session-token', user: userBody }))
     await expect(backend.verifyCode('ann@example.com', '123456')).resolves.toEqual({
       ok: true,
-      value: { id: 'u1', email: 'ann@example.com', name: null, image: null },
+      value: {
+        user: { id: 'u1', email: 'ann@example.com', name: null, image: null },
+        token: 'session-token',
+      },
     })
     expect(requests[0]).toMatchObject({
       url: 'http://localhost:5173/api/auth/sign-in/email-otp',

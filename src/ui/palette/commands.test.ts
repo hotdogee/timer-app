@@ -262,6 +262,23 @@ describe('buildCommands', () => {
     expect(actions.undoRemove).toHaveBeenCalledTimes(1)
   })
 
+  it('offers the mini window for the selected card only where the platform has one', () => {
+    const without = setup()
+    without.store.addTimer()
+    expect(visible(without.ctx).has('mini-window')).toBe(false)
+
+    const { ctx, store, actions } = setup({ miniWindow: true })
+    store.addStopwatch()
+    expect(get(ctx, 'mini-window')).toMatchObject({
+      title: 'Open in mini window',
+      hint: 'Stopwatch',
+      shortcut: 'miniWindow',
+      icon: 'picture_in_picture_alt',
+    })
+    get(ctx, 'mini-window').run()
+    expect(actions.miniWindow).toHaveBeenCalledWith('id1')
+  })
+
   it('deletes through the app, which may ask first, and the store keeps the card for undo', () => {
     const { ctx, store, actions } = setup()
     store.addTimer()

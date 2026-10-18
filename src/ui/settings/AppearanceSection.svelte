@@ -3,7 +3,10 @@
   Settings › Appearance (spec › Settings): theme, seed color, font, digit weight and size, ring
   thickness, card density and language. These are device settings: they stay on this device.
   Every change applies at once (the app themes itself from `settingsStore.device`); sliders and
-  the color picker apply while they move. Reset restores every appearance default.
+  the color picker apply while they move. Reset restores every appearance default. In the desktop
+  app the default color is the system accent (spec Q20): the picker shows it and says it follows
+  the system, and the reset button reads "Use the system accent"; the language follows the
+  system's.
 
   ```svelte
   <AppearanceSection {settingsStore} />
@@ -12,12 +15,14 @@
 <script lang="ts">
   import { settings } from '../../core'
   import { LOCALES, LOCALE_NAMES, localeState, m } from '../../i18n'
+  import { platform } from '../../platform'
   import type { SettingsStore } from '../../state/settings.svelte'
   import { announce } from '../announce.svelte'
   import Button from '../primitives/Button.svelte'
   import SegmentedButtons from '../primitives/SegmentedButtons.svelte'
   import Select from '../primitives/Select.svelte'
   import Slider from '../primitives/Slider.svelte'
+  import { defaultSeedState } from '../theme/default-seed.svelte'
   import { DEFAULT_SEED } from '../theme/seed'
   import SectionHeader from './SectionHeader.svelte'
   import SettingRow from './SettingRow.svelte'
@@ -64,8 +69,23 @@
 
   const percent = (value: number) => percentText(value, localeState.current)
 
-  /** The color the picker shows: the seed, or the default seed when none is set. */
-  const seedColor = $derived(device.seed === '' ? DEFAULT_SEED.toLowerCase() : device.seed)
+  /** The system accent the default seed follows (desktop), or null for none (Google blue). */
+  const accent = $derived(defaultSeedState.current)
+  /** The color the picker shows: the seed, or the default seed in use when none is set. */
+  const seedColor = $derived(
+    device.seed === '' ? (accent ?? DEFAULT_SEED.toLowerCase()) : device.seed,
+  )
+  const seedDescription = $derived(
+    device.seed === '' && accent !== null
+      ? m.settings_seed_description_accent()
+      : m.settings_seed_description(),
+  )
+  /** The desktop app's webview takes its language from the system, not from a browser. */
+  const languageDescription = $derived(
+    platform.kind === 'tauri'
+      ? m.settings_language_description_desktop()
+      : m.settings_language_description(),
+  )
 
   let seedInput = $state<HTMLInputElement>()
   let pendingSeed: string | null = null
@@ -123,10 +143,14 @@
   {/snippet}
 </SettingRow>
 
-<SettingRow label={m.settings_seed()} description={m.settings_seed_description()} layout="inline">
+<SettingRow label={m.settings_seed()} description={seedDescription} layout="inline">
   {#snippet control(ids: ControlIds)}
     {#if device.seed !== ''}
-      <Button variant="text" label={m.settings_seed_default()} onclick={defaultSeed} />
+      <Button
+        variant="text"
+        label={accent !== null ? m.settings_seed_system() : m.settings_seed_default()}
+        onclick={defaultSeed}
+      />
     {/if}
     <input
       bind:this={seedInput}
@@ -219,7 +243,7 @@
   {/snippet}
 </SettingRow>
 
-<SettingRow label={m.settings_language()} description={m.settings_language_description()}>
+<SettingRow label={m.settings_language()} description={languageDescription}>
   {#snippet control(ids: ControlIds)}
     <Select
       id={ids.id}

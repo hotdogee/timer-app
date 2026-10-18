@@ -10,9 +10,13 @@
  * - `GET /api/export`: the user's synced data as the server holds it.
  * - `GET /__dev/otp?email=`: development only, the last sign-in code sent to an address.
  * Any other `/api/*` or `/__dev/*` path is a JSON 404; everything else goes to the assets.
+ *
+ * `/api/*` answers the desktop app's origins across origins (`cors.ts`): CORS headers on its
+ * responses, and 204 for preflights.
  */
 import { authenticate, createAuth } from './auth'
 import { appEnv, isDevelopment } from './config'
+import { isPreflight, preflight, withCors } from './cors'
 import { apiError, isWebSocketUpgrade, json, methodNotAllowed, withApiHeaders } from './http'
 import { lastDevCode } from './mail'
 import {
@@ -149,6 +153,13 @@ function devOtp(url: URL): Response {
 
 /** Routes one request (see the module comment). */
 export async function route(request: Request, env: Env): Promise<Response> {
+  if (!under(new URL(request.url).pathname, '/api')) return serve(request, env)
+  if (isPreflight(request)) return preflight(request, env)
+  return withCors(request, env, await serve(request, env))
+}
+
+/** Serves one request, CORS aside. */
+async function serve(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   const path = url.pathname
 

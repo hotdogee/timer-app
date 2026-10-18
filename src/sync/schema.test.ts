@@ -4,12 +4,16 @@ import { describe, expect, it } from 'vitest'
 import { cards, keymap, settings, type StopwatchState, type TimerState } from '../core'
 import type { Preset } from '../state/presets'
 import {
+  AUTH_VALUE_IDS,
+  DESKTOP_VALUE_IDS,
   DEVICE_VALUES_SCHEMA,
   SYNCED_TABLES_SCHEMA,
   SYNCED_VALUES_SCHEMA,
   cardToRow,
   cardsFromTable,
   changedValues,
+  desktopSettingsToValues,
+  deviceAuthToValues,
   deviceSettingsToValues,
   presetToRow,
   presetsFromTable,
@@ -17,6 +21,8 @@ import {
   rowToPreset,
   sameCard,
   syncedSettingsToValues,
+  valuesToDesktopSettings,
+  valuesToDeviceAuth,
   valuesToDeviceSettings,
   valuesToSyncedSettings,
   type CardRow,
@@ -83,9 +89,17 @@ describe('the store schemas', () => {
     )
   })
 
-  it('have a device value for every device setting, plus the schema version', () => {
+  it('have a value for every device and desktop setting and the token, plus the version', () => {
     expect(Object.keys(DEVICE_VALUES_SCHEMA).sort()).toEqual(
-      [...Object.keys(settings.DEVICE_DEFAULTS), 'schemaVersion'].sort(),
+      [
+        ...Object.keys(settings.DEVICE_DEFAULTS),
+        ...DESKTOP_VALUE_IDS,
+        ...AUTH_VALUE_IDS,
+        'schemaVersion',
+      ].sort(),
+    )
+    expect(Object.keys(desktopSettingsToValues(settings.DESKTOP_DEFAULTS)).sort()).toEqual(
+      [...DESKTOP_VALUE_IDS].sort(),
     )
   })
 
@@ -471,5 +485,99 @@ describe('device settings values', () => {
     const first = valuesToDeviceSettings({ locale: 'ja' })
     expect(valuesToDeviceSettings({ locale: 'ja' }, first)).toBe(first)
     expect(valuesToDeviceSettings({ locale: 'en' }, first).locale).toBe('en')
+  })
+})
+
+describe('desktop settings values', () => {
+  const desktop: settings.DesktopSettings = {
+    launchAtLogin: true,
+    closeBehavior: 'quit',
+    miniAlwaysOnTop: false,
+    hotkeys: { toggleLast: 'Mod+Shift+Space', showApp: null },
+  }
+
+  it('are the defaults when nothing is stored, as before the desktop group existed', () => {
+    expect(valuesToDesktopSettings({})).toEqual(settings.DESKTOP_DEFAULTS)
+    expect(valuesToDesktopSettings({ schemaVersion: 1, themeMode: 'dark' })).toEqual(
+      settings.DESKTOP_DEFAULTS,
+    )
+  })
+
+  it('store an unbound hotkey as an empty combo, and round-trip', () => {
+    expect(desktopSettingsToValues(desktop)).toEqual({
+      launchAtLogin: true,
+      closeBehavior: 'quit',
+      miniAlwaysOnTop: false,
+      hotkeyToggleLast: 'Mod+Shift+Space',
+      hotkeyShowApp: '',
+    })
+    expect(valuesToDesktopSettings(desktopSettingsToValues(desktop))).toEqual(desktop)
+  })
+
+  it('read invalid values as their defaults', () => {
+    expect(
+      valuesToDesktopSettings({ closeBehavior: 'hide', hotkeyToggleLast: 'Mod+', authToken: 'x' }),
+    ).toEqual(settings.DESKTOP_DEFAULTS)
+  })
+
+  it('leave the device settings alone, and the device settings leave them alone', () => {
+    const values = { ...deviceSettingsToValues(settings.DEVICE_DEFAULTS), locale: 'ja' }
+    expect(valuesToDesktopSettings({ ...values, ...desktopSettingsToValues(desktop) })).toEqual(
+      desktop,
+    )
+    expect(valuesToDeviceSettings({ ...values, ...desktopSettingsToValues(desktop) })).toEqual({
+      ...settings.DEVICE_DEFAULTS,
+      locale: 'ja',
+    })
+  })
+
+  it('give back the previous object when nothing changed, and its hotkeys while they stay', () => {
+    const first = valuesToDesktopSettings(desktopSettingsToValues(desktop))
+    expect(valuesToDesktopSettings(desktopSettingsToValues(desktop), first)).toBe(first)
+    const changed = valuesToDesktopSettings(
+      { ...desktopSettingsToValues(desktop), closeBehavior: 'tray' },
+      first,
+    )
+    expect(changed).not.toBe(first)
+    expect(changed.closeBehavior).toBe('tray')
+    expect(changed.hotkeys).toBe(first.hotkeys)
+    const rebound = valuesToDesktopSettings(
+      { ...desktopSettingsToValues(desktop), hotkeyShowApp: 'Mod+Shift+T' },
+      first,
+    )
+    expect(rebound.hotkeys).toEqual({ toggleLast: 'Mod+Shift+Space', showApp: 'Mod+Shift+T' })
+  })
+})
+
+describe('bearer token values', () => {
+  const auth: settings.DeviceAuth = { token: 'tok.en+/=', expiresAt: NOW + 30 * 24 * 60 * MINUTE }
+
+  it('are no token when nothing (or only half of one) is stored', () => {
+    expect(valuesToDeviceAuth({})).toBeNull()
+    expect(valuesToDeviceAuth({ authToken: 'abc' })).toBeNull()
+    expect(valuesToDeviceAuth({ authExpiresAt: NOW })).toBeNull()
+  })
+
+  it('round-trip a token', () => {
+    expect(deviceAuthToValues(auth)).toEqual({
+      authToken: 'tok.en+/=',
+      authExpiresAt: auth.expiresAt,
+    })
+    expect(valuesToDeviceAuth(deviceAuthToValues(auth))).toEqual(auth)
+  })
+
+  it('read an unusable token as none', () => {
+    expect(valuesToDeviceAuth({ authToken: 'two words', authExpiresAt: NOW })).toBeNull()
+    expect(valuesToDeviceAuth({ authToken: 'abc', authExpiresAt: -5 })).toBeNull()
+  })
+
+  it('give back the previous token when it is the same', () => {
+    const first = valuesToDeviceAuth(deviceAuthToValues(auth))
+    expect(valuesToDeviceAuth(deviceAuthToValues(auth), first)).toBe(first)
+    expect(valuesToDeviceAuth(deviceAuthToValues({ ...auth, token: 'other' }), first)).toEqual({
+      ...auth,
+      token: 'other',
+    })
+    expect(valuesToDeviceAuth({}, first)).toBeNull()
   })
 })

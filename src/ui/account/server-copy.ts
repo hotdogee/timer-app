@@ -14,8 +14,13 @@ import { saveFile, type DownloadEnvironment } from '../settings/data-file'
 export interface ServerCopyOptions {
   /** The export endpoint's URL; `/api/export` on the API origin by default. */
   readonly url?: string
-  /** `fetch`, or one that adds the desktop app's bearer token. */
+  /** `fetch` (tests). */
   readonly fetch?: (url: string, init: RequestInit) => Promise<Response>
+  /**
+   * The desktop app's bearer token, sent instead of the session cookie (the API is on another
+   * origin there); null on the web.
+   */
+  readonly token?: string | null
   readonly environment?: DownloadEnvironment
 }
 
@@ -55,10 +60,14 @@ export function serverCopyFileName(exportedAt: number): string {
  */
 export async function downloadServerCopy(options: ServerCopyOptions = {}): Promise<string> {
   const request = options.fetch ?? ((url, init) => fetch(url, init))
+  const token = options.token ?? null
   const response = await request(options.url ?? apiUrl(API_PATHS.export), {
-    credentials: 'include',
+    credentials: token === null ? 'include' : 'omit',
     cache: 'no-store',
-    headers: { Accept: 'application/json' },
+    headers:
+      token === null
+        ? { Accept: 'application/json' }
+        : { Accept: 'application/json', Authorization: `Bearer ${token}` },
   })
   if (!response.ok) throw new ServerCopyError(response.status, response.statusText)
   let body: unknown
