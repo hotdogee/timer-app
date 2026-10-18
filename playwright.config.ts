@@ -3,13 +3,22 @@ import { defineConfig, devices } from '@playwright/test'
 const ci = Boolean(process.env.CI)
 
 /**
- * Which server the tests run against. `dev` (the local default) serves the source through Vite and
- * reuses a dev server that is already running. `preview` (the CI default) serves the production
- * build, so run `pnpm build` first. Override with `E2E_SERVER=dev|preview`.
+ * Which servers the tests run against. Every run starts the sync server: `wrangler dev` on port
+ * 8787 in development mode, on a fresh local D1 and Durable Object state with the migrations
+ * applied (e2e/sync-server.ts). A wrangler already listening on 8787 fails the run rather than
+ * being reused, since its state and settings are unknown.
+ *
+ * - `dev` (the local default): Vite's dev server on 5173 serves the source and proxies `/api` and
+ *   `/__dev` to wrangler (vite.config.ts); a Vite dev server that is already running is reused.
+ * - `preview` (the CI default): the production build as production serves it, with wrangler
+ *   serving `dist/` and the API at one origin on 8787. Run `pnpm build` first.
+ *
+ * Override with `E2E_SERVER=dev|preview`.
  */
 const server = process.env.E2E_SERVER ?? (ci ? 'preview' : 'dev')
-const port = server === 'preview' ? 4173 : 5173
-const baseURL = `http://localhost:${port}`
+const preview = server === 'preview'
+const syncPort = 8787
+const baseURL = preview ? `http://localhost:${String(syncPort)}` : 'http://localhost:5173'
 
 export default defineConfig({
   testDir: 'e2e',
@@ -26,10 +35,25 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: server === 'preview' ? `pnpm preview --port ${port} --strictPort` : 'pnpm dev',
-    url: baseURL,
-    reuseExistingServer: !ci,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      name: 'sync server',
+      command: `node e2e/sync-server.ts ${baseURL}${preview ? ' --serve-build' : ''}`,
+      // wrangler listens on IPv4 only.
+      url: `http://127.0.0.1:${String(syncPort)}/api/time`,
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    ...(preview
+      ? []
+      : [
+          {
+            name: 'vite',
+            command: 'pnpm dev',
+            url: baseURL,
+            reuseExistingServer: !ci,
+            timeout: 120_000,
+          },
+        ]),
+  ],
 })

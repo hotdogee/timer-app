@@ -60,7 +60,7 @@ textarea {
  * broken: headings and short texts break between phrases where the browser can tell them apart
  * (Chromium; others ignore it), still wrapping anywhere when a phrase does not fit.
  */
-:root:lang(ja) :is(h1, h2, h3, h4, p, dt, .description) {
+:root:lang(ja) :is(h1, h2, h3, h4, p, dt, label, .description) {
   word-break: auto-phrase;
   overflow-wrap: break-word;
 }

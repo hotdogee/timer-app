@@ -1,0 +1,9 @@
+# Response headers for the static assets (the web app, including the /device approval page), applied
+# by Workers Static Assets in production and by `wrangler dev`. The Worker's own /api responses set
+# theirs in server/src/http.ts. No page of the app is ever meant to be framed: that keeps another site,
+# or a sibling subdomain, from overlaying the device approval page and tricking a click on Approve.
+/*
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: same-origin

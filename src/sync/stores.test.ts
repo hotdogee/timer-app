@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { setClockOffset } from '../state/app-clock'
 import { appStores, createAppStores, createDeviceStore, createSyncedStore } from './stores'
 
+const START = Date.UTC(2026, 9, 18, 9, 0, 0)
+
 describe('createSyncedStore', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('is an empty mergeable store', () => {
     const store = createSyncedStore()
     expect(store.isMergeable()).toBe(true)
@@ -30,6 +37,26 @@ describe('createSyncedStore', () => {
       cards: { a: { kind: 'timer', name: 'Tea', duration: 60_000 } },
     })
     expect(store.getValues()).toEqual({ loop: false })
+  })
+
+  it('stamps changes with app time by default', () => {
+    vi.useFakeTimers({ now: START })
+    // App time two minutes ahead of the device clock (a measured server-time offset).
+    const corrected = createSyncedStore('corrected')
+    setClockOffset(120_000)
+    try {
+      corrected.setValue('volume', 0.2)
+    } finally {
+      setClockOffset(0)
+    }
+    // A minute later by the device clock, still earlier than that app time: the corrected change
+    // wins.
+    vi.setSystemTime(START + 60_000)
+    const plain = createSyncedStore('plain', () => Date.now())
+    plain.setValue('volume', 0.7)
+    plain.merge(corrected)
+    expect(plain.getValue('volume')).toBe(0.2)
+    expect(corrected.getValue('volume')).toBe(0.2)
   })
 
   it('uses the given id and clock for its merge stamps', () => {

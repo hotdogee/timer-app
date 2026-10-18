@@ -1,9 +1,9 @@
 <!--
   @component
   The settings dialog (spec › Settings): a modal with the sections (Appearance, Behavior, Keyboard,
-  Presets, Data, About) in a list beside the content when the window is wide, or in a scrolling
-  tab strip above it when not. Every change applies at once, with no Save button; each section
-  that holds settings has a Reset. It opens on the last section shown, with focus on that
+  Presets, Data, Account, About) in a list beside the content when the window is wide, or in a
+  scrolling tab strip above it when not. Every change applies at once, with no Save button; each
+  section that holds settings has a Reset. It opens on the last section shown, with focus on that
   section's tab; Esc, the close button, a backdrop click or the settings shortcut (`Mod+,`) again
   close it (a shortcut without Ctrl, Alt or Meta not while a text field has focus), and focus
   returns to whatever opened it.
@@ -11,8 +11,9 @@
   The stores are the app's (`settingsStore`, `presetStore` from `src/state`). Export and import
   are the app's to do: `onexport` saves the file (see `downloadExport` in `data-file.ts`), and
   `onimport` gets a validated file's data once the user agreed to replace everything (pass it to
-  `app-data`'s `replaceAll`). The modal dialog makes the page inert, so it carries its own copy of
-  the app's live region.
+  `app-data`'s `replaceAll`). Account reads the app's auth state and sync connection (`authStore`,
+  `remoteSync`) unless others are passed. The modal dialog makes the page inert, so it carries its
+  own copy of the app's live region.
 
   ```svelte
   <SettingsDialog bind:open {settingsStore} {presetStore} cardCount={cardStore.cards.length}
@@ -27,12 +28,18 @@
   import { m } from '../../i18n'
   import { platform, type Notifier, type PlatformKind } from '../../platform'
   import { detectKeyPlatform, isTextEntry } from '../../state/keyboard.svelte'
+  import { authStore } from '../../state/auth.svelte'
   import type { PresetStore } from '../../state/presets.svelte'
   import type { SettingsStore } from '../../state/settings.svelte'
+  import { syncPreference as appSyncPreference } from '../../state/sync-preference.svelte'
+  import type { SyncPreference } from '../../state/sync-preference.svelte'
+  import { remoteSync } from '../../sync/remote.svelte'
+  import type { AccountAuth, SyncInfo } from '../account/types'
   import Announcer from '../Announcer.svelte'
   import Dialog from '../primitives/Dialog.svelte'
   import IconButton from '../primitives/IconButton.svelte'
   import AboutSection from './AboutSection.svelte'
+  import AccountSection from './AccountSection.svelte'
   import AppearanceSection from './AppearanceSection.svelte'
   import BehaviorSection from './BehaviorSection.svelte'
   import DataSection from './DataSection.svelte'
@@ -67,6 +74,12 @@
     notifier?: Pick<Notifier, 'permission' | 'request'>
     /** Plays a sound once, for Behavior's Preview. */
     previewSound?: (sound: settings.SoundId, volume: number) => void
+    /** The auth state, for Account; the app's `authStore` by default. */
+    auth?: AccountAuth
+    /** The sync connection, for Account; the app's `remoteSync` by default. */
+    sync?: SyncInfo | null
+    /** This device's sync switch, for Account; the app's by default, null hides it. */
+    syncPreference?: SyncPreference | null
   }
 
   let {
@@ -85,6 +98,9 @@
     previewSound = (sound, volume) => {
       platform.audio.preview(sound, volume)
     },
+    auth = authStore,
+    sync = remoteSync,
+    syncPreference = appSyncPreference,
   }: Props = $props()
 
   const uid = $props.id()
@@ -181,6 +197,8 @@
           <PresetsSection {presetStore} timeStyle={settingsStore.synced.timeStyle} />
         {:else if section === 'data'}
           <DataSection {cardCount} presetCount={presetStore.presets.length} {onexport} {onimport} />
+        {:else if section === 'account'}
+          <AccountSection {auth} {sync} {syncPreference} />
         {:else}
           <AboutSection {version} {platformKind} />
         {/if}

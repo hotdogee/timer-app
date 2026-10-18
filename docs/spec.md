@@ -143,13 +143,13 @@ v1 syncs cards and their live state across devices.
 - **Offline first**: the local copy is the source of truth. Every action works offline and syncs when the connection returns.
 - **Realtime**: starting a timer on one device shows it running on the others within about a second.
 - **Conflicts**: last-writer-wins per card field; enough for this data.
-- **Clock skew**: device clocks can differ by seconds. Timestamps are corrected with a server-time offset so every device shows the same remaining time.
-- **What syncs**: cards and behavior settings. Appearance settings (font size, density) stay per device by default, since a phone and a 4K screen want different sizes.
-- **Desktop sign-in**: Google blocks OAuth inside embedded webviews, so the desktop app signs in through the system browser and a deep link, or with an emailed code.
+- **Clock skew**: device clocks can differ by seconds. Timestamps are corrected with a server-time offset so every device shows the same remaining time. The offset comes from `/api/time` (three samples, the one with the smallest round trip wins), is applied when it is 250 ms or more, and is measured again on sign-in, on every reconnect and every 30 minutes. Signed out, there is no offset.
+- **What syncs**: cards, presets and behavior settings. Appearance settings (font size, density) and the language stay per device, since a phone and a 4K screen want different sizes.
+- **Desktop sign-in**: Google blocks OAuth inside embedded webviews, so the desktop app signs in with device authorization: it shows a short code, the user approves it on the `/device` page in the system browser, and the app receives a bearer token (no deep link). The emailed code works on desktop too.
 - **Obligations**: privacy policy, account deletion, data export.
 - **Accounts are optional.** The app works fully signed out; signing in turns on sync and uploads the local cards.
 - **Sign-in**: email code, Google, Apple, GitHub.
-- **Ringing**: every device with the app open rings; dismissing on any device stops them all.
+- **Ringing**: every device with the app open rings; dismissing on any device stops them all. A device that was closed when a timer ended catches up without undoing a dismiss, pause or reset made elsewhere.
 - **Backend**: our own sync server on Cloudflare Workers; see [tech-stack.md › Server](tech-stack.md#server).
 
 ## Accessibility
@@ -179,7 +179,7 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 | Presets | Add, rename, change the duration, reorder, delete (no Reset: presets are user data) |
 | Desktop | Launch at login, close behavior, always-on-top |
 | Data | Export / import cards, presets and settings (JSON) |
-| Account | Sign in / out, sync on / off, delete account and data |
+| Account | Sign in / out, "Sync this device" switch (per device), download the server copy, delete account and data |
 | About | Version, platform, source code, license |
 
 ## Milestones
@@ -189,7 +189,7 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 | M1 | Project scaffold; core engine (timer, stopwatch, digit entry, formatting, frame ticker) with tests; Tauri scaffold; dev harness | Done 2026-10-17 |
 | M2 | Designed Material 3 card, card grid, edit mode, keyboard layer, command palette | Done 2026-10-18 |
 | M3 | TinyBase stores on IndexedDB, settings and themes, i18n (en, zh-TW, ja), PWA | Done 2026-10-18 |
-| M4 | Sync server on Cloudflare Workers, Better Auth, sign-in flows | Planned |
+| M4 | Sync server on Cloudflare Workers, Better Auth, sign-in flows | Done 2026-10-18 |
 | M5 | Desktop: tray, background alarms, mini window, global hotkeys, updater, autostart | Planned |
 | M6 | Release: signing, CI builds, GitHub Releases, winget, Homebrew, Microsoft Store | Planned |
 
@@ -197,7 +197,9 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 
 - **(Q22)** App icon. A placeholder ships (blue rounded square with a white ring and dot) until a real icon is designed; it is used for the PWA, the favicon and, in M6, the desktop installers.
 
-New questions continue from Q23.
+- **(Q23)** Privacy policy. `docs/privacy.md` is a draft with operator and contact placeholders; fill them in, have it reviewed and publish it before the first public release.
+
+New questions continue from Q24.
 
 ## Decisions
 
@@ -239,3 +241,7 @@ New questions continue from Q23.
 | 2026-10-18 | — | PWA: precache the whole app, prompt to update, placeholder icon (Q22). The service worker is not registered inside Tauri. |
 | 2026-10-18 | — | M3 as built: Presets, Data and About have no Reset, and Behavior's Reset keeps the keymap. Rebinding records one key per action, stores combos portably (`Mod`), treats `?` and `Shift+?` as one key, and offers "Move here" on a conflict. Startup falls back to memory when IndexedDB fails or does not answer within 3 s; a tab that cannot save never seeds over its peers. Compact density counts as a short card, so running timers may drop `+0:30`. Snooze is deferred. |
 | 2026-10-18 | — | Text: CJK fallback fonts follow the UI language (Yu Gothic, Hiragino Sans for ja; Microsoft JhengHei, PingFang TC for zh-TW). zh-TW says 預設集 for presets so it does not read as 預設值 (defaults). The placeholder maskable icon fills the safe zone; revisit with the real icon (Q22). |
+| 2026-10-18 | — | Server: one Cloudflare Worker serves the web app and `/api/*`; Better Auth on D1 (email code through Resend, Google, GitHub and Apple, each shown only when configured); one Durable Object per user (`SyncObject`, SQLite) relays TinyBase sync; `/api/time` gives the clock offset, `/api/export` the user's store as JSON; `/__dev/otp` exists only with `APP_ENV=development` (the config defaults to production). |
+| 2026-10-18 | — | Sync socket: the bearer token travels only in the `Sec-WebSocket-Protocol` header (`timer-auth.<token>`, answered with `timer-sync`), never in the URL. The Worker passes the session to the Durable Object, which checks it on every message and closes sockets with 4401 on sign-out, revocation or account deletion. Heartbeat ping every 30 s; no pong within 10 s reconnects. |
+| 2026-10-18 | — | Sign-in limits: 6-digit codes valid 10 minutes, 5 attempts, resends reuse the code; 5 codes per address per hour; a server-wide daily email cap (default 100); per-IP rate limits of 60 a minute per path, 10 for `/device`. In production without a mail key the server refuses to send and never logs codes. OAuth failures return to the app with `?error=`. |
+| 2026-10-18 | — | Client sync: a "Sync this device" switch (device-only, back on after sign-out); sync starts after the first clock measurement; first-run seed rows are stamped at time zero so the account's edits and deletions beat a fresh device's defaults; a timer's settle to ringing is stamped right after its running stamp so it never undoes a later dismiss; the session is re-checked on a 4401 close or three failed connects. Pages get `frame-ancestors 'none'`, nosniff and a referrer policy through `public/_headers`. |

@@ -1,8 +1,8 @@
 /**
  * The installable, offline web app (spec › Persistence and instances): the manifest and icons, the
  * service worker, and a reload with the network off. Only the production build has a manifest and
- * a worker, so these run against `pnpm preview` (`E2E_SERVER=preview`, the CI default; run
- * `pnpm build` first) and are skipped against the dev server.
+ * a worker, so these run against the build as wrangler serves it (`E2E_SERVER=preview`, the CI
+ * default; run `pnpm build` first) and are skipped against the dev server.
  */
 import { cardCells, expect, test } from './support'
 
@@ -57,15 +57,24 @@ test('links a manifest with the app name and icons, and every icon loads', async
   }
 })
 
-test('activates the service worker and reloads with the network off', async ({ page, context }) => {
+test('activates the service worker and reloads with the network off', async ({
+  page,
+  context,
+  allowedErrors,
+}) => {
+  // Offline, the app's session check and its server settings request fail (the app carries on
+  // without them), and the browser logs both.
+  allowedErrors.push(/Failed to load resource: net::ERR_INTERNET_DISCONNECTED/)
   await page.goto('/')
   await expect(cardCells(page).first()).toBeVisible()
-  // The worker installs (precaching the whole app) before it activates.
+  // The worker installs (precaching the whole app) before it activates. It fetches the files one
+  // after another, which takes a few seconds from wrangler dev's local asset server while the
+  // other tests load it too.
   await expect
     .poll(
       () =>
         page.evaluate(async () => (await navigator.serviceWorker.ready).active?.state ?? 'none'),
-      { message: 'the service worker activates (main.ts calls registerPwa())' },
+      { message: 'the service worker activates (main.ts calls registerPwa())', timeout: 20_000 },
     )
     .toBe('activated')
 

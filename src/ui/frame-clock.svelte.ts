@@ -3,7 +3,8 @@
  * loop (tech-stack.md › Principles, "One render loop"). The loop runs only while some display
  * changes over time; the app switches it with `setActive`.
  */
-import { createTicker, systemClock, type Clock, type EpochMs, type FrameScheduler } from '../core'
+import { createTicker, type Clock, type EpochMs, type FrameScheduler } from '../core'
+import { appClock } from '../state/app-clock'
 
 /** A clock reading shared by every view, refreshed once per animation frame while active. */
 export interface FrameClock {
@@ -32,10 +33,11 @@ const animationFrames: FrameScheduler<number> = {
 
 /**
  * Creates an inactive frame clock that reads `clock` once per `scheduler` frame while active.
- * Defaults to the system clock and `requestAnimationFrame`.
+ * Defaults to the app clock (device time corrected by the server-time offset) and
+ * `requestAnimationFrame`.
  */
 export function createFrameClock(
-  clock: Clock = systemClock,
+  clock: Clock = appClock,
   scheduler: FrameScheduler = animationFrames,
 ): FrameClock {
   let now = $state(clock())
@@ -59,5 +61,5 @@ export function createFrameClock(
   }
 }
 
-/** The app's one frame clock: system time, advanced by `requestAnimationFrame`. */
+/** The app's one frame clock: app time, advanced by `requestAnimationFrame`. */
 export const frameClock = createFrameClock()

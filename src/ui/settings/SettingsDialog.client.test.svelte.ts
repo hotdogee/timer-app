@@ -15,6 +15,8 @@ import { BUILTIN_PRESETS } from '../../state/presets'
 import { createPresetStore } from '../../state/presets.svelte'
 import { createSettingsStore } from '../../state/settings.svelte'
 import { createAppStores } from '../../sync/stores'
+import { createFakeAuth } from '../account/fake-auth.svelte'
+import type { AccountAuth, SyncInfo } from '../account/types'
 import { currentAnnouncement } from '../announce.svelte'
 import type { SectionId } from './sections'
 import SettingsDialog from './SettingsDialog.svelte'
@@ -51,6 +53,8 @@ async function setup(
     section?: SectionId
     keyPlatform?: keymap.Platform
     permission?: NotificationPermissionState
+    auth?: AccountAuth
+    sync?: SyncInfo | null
   } = {},
 ) {
   const stores = createAppStores()
@@ -98,6 +102,8 @@ async function setup(
       platformKind: 'web',
       version: '1.2.3',
       notifier,
+      auth: options.auth ?? createFakeAuth().auth,
+      sync: options.sync ?? null,
       ...calls,
     },
   })
@@ -179,7 +185,15 @@ describe('the dialog', () => {
     const title = document.getElementById(dialog.getAttribute('aria-labelledby') ?? '')
     expect(title?.textContent).toBe('Settings')
     const tabs = [...target.querySelectorAll('[role="tab"]')].map((t) => t.textContent.trim())
-    expect(tabs).toEqual(['Appearance', 'Behavior', 'Keyboard', 'Presets', 'Data', 'About'])
+    expect(tabs).toEqual([
+      'Appearance',
+      'Behavior',
+      'Keyboard',
+      'Presets',
+      'Data',
+      'Account',
+      'About',
+    ])
     expect(query(target, '[role="tablist"]').getAttribute('aria-label')).toBe('Settings sections')
     await settle()
     expect(document.activeElement).toBe(tab(target, 'Appearance'))
@@ -749,5 +763,25 @@ describe('About', () => {
     const link = query<HTMLAnchorElement>(target, 'a[href]')
     expect(link.href).toBe('https://github.com/hotdogee/timer-app')
     expect(link.rel).toBe('noopener noreferrer')
+    const privacy = [...target.querySelectorAll<HTMLAnchorElement>('a[href]')].find(
+      (a) => a.textContent.trim() === 'Privacy policy',
+    )
+    expect(privacy?.href).toBe('https://github.com/hotdogee/timer-app/blob/main/docs/privacy.md')
+    expect(privacy?.target).toBe('_blank')
+  })
+})
+
+describe('Account', () => {
+  it('shows the auth state it is given: sign-in, or the account and its sync', async () => {
+    const fake = createFakeAuth({ providers: ['google'] })
+    const { target } = await setup({ section: 'account', auth: fake.auth })
+    expect(query(target, '[role="tabpanel"] h3').textContent).toBe('Account')
+    expect(target.textContent).toContain('Sign in to sync your cards across devices')
+    expect(button(target, 'Continue with Google')).toBeTruthy()
+    fake.state.user = { id: 'u1', email: 'ada@example.com', name: null, image: null }
+    fake.state.status = 'signed-in'
+    await settle()
+    expect(target.textContent).toContain('Signed in as ada@example.com')
+    expect(target.textContent).toContain('Not syncing')
   })
 })

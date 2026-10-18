@@ -17,7 +17,15 @@ afterEach(() => {
 
 describe('sections', () => {
   it('lists the sections in display order', () => {
-    expect(SECTION_IDS).toEqual(['appearance', 'behavior', 'keyboard', 'presets', 'data', 'about'])
+    expect(SECTION_IDS).toEqual([
+      'appearance',
+      'behavior',
+      'keyboard',
+      'presets',
+      'data',
+      'account',
+      'about',
+    ])
     expect(Object.isFrozen(SECTION_IDS)).toBe(true)
   })
 
@@ -28,10 +36,12 @@ describe('sections', () => {
       'Keyboard',
       'Presets',
       'Data',
+      'Account',
       'About',
     ])
     setAppLocale('zh-TW')
     expect(sectionTitle('presets')).toBe('預設集')
+    expect(sectionTitle('account')).toBe('帳號')
   })
 
   it('has an icon with path data for each section', () => {
@@ -40,7 +50,8 @@ describe('sections', () => {
 
   it('recognizes section ids', () => {
     expect(isSectionId('keyboard')).toBe(true)
-    expect(isSectionId('account')).toBe(false)
+    expect(isSectionId('account')).toBe(true)
+    expect(isSectionId('desktop')).toBe(false)
     expect(isSectionId(undefined)).toBe(false)
   })
 

@@ -5,6 +5,7 @@
  * will schedule in Rust behind the same interface.
  */
 import { systemClock, type Clock, type EpochMs } from '../core'
+import { appClock, onClockOffsetChange } from '../state/app-clock'
 import {
   WAKE_FIRE,
   createWakeTimer,
@@ -54,13 +55,22 @@ export interface VisibilityLike {
 
 /** Dependencies of {@link createWebWakeScheduler}; every field has a browser default. */
 export interface WebWakeSchedulerOptions {
-  /** The clock deadlines are given in, and checked against before `onFire`. Defaults to system time. */
+  /**
+   * The clock deadlines are given in, and checked against before `onFire`. Defaults to the app
+   * clock (device time plus the server-time offset), which timer deadlines are stamped in.
+   */
   readonly clock?: Clock
   /**
    * The clock the worker reads (`Date.now` in the worker). Deadlines are converted from `clock` to
    * this clock before they are posted. Defaults to system time.
    */
   readonly deviceClock?: Clock
+  /**
+   * Subscribes to changes of `clock` against `deviceClock` (a new server-time offset), after which
+   * the pending deadline is converted and armed again; returns the unsubscribe. Defaults to the app
+   * clock's offset changes; null ignores them.
+   */
+  readonly clockChanges?: ((listener: () => void) => () => void) | null
   /** Spawns the wake worker, or null to always use a main-thread timeout. */
   readonly createWorker?: (() => WakeWorkerLike) | null
   /** Timers for the main-thread fallback. */
@@ -98,8 +108,10 @@ interface Pending {
 
 /** Creates the web wake scheduler. It spawns the worker lazily, at the first deadline. */
 export function createWebWakeScheduler(options: WebWakeSchedulerOptions = {}): WebWakeScheduler {
-  const clock = options.clock ?? systemClock
+  const clock = options.clock ?? appClock
   const deviceClock = options.deviceClock ?? systemClock
+  const clockChanges =
+    options.clockChanges === undefined ? onClockOffsetChange : options.clockChanges
   const createWorker =
     options.createWorker === undefined ? defaultWorkerFactory() : options.createWorker
   const timers = options.timers ?? globalTimers
@@ -108,6 +120,7 @@ export function createWebWakeScheduler(options: WebWakeSchedulerOptions = {}): W
   let pending: Pending | null = null
   let backend: Backend | null = null
   let listening = false
+  let stopClockChanges: (() => void) | null = null
 
   /** A deadline from `clock` expressed in `deviceClock` time; exact when they are the same clock. */
   function toDevice(at: EpochMs): EpochMs {
@@ -185,7 +198,13 @@ export function createWebWakeScheduler(options: WebWakeSchedulerOptions = {}): W
     current.onFire()
   }
 
+  function onClockChange(): void {
+    // The deadline is the same app time, but a different device time now: post it again.
+    if (pending) backend?.set(pending.at)
+  }
+
   function listen(): void {
+    stopClockChanges ??= clockChanges?.(onClockChange) ?? null
     if (listening || !visibility) return
     listening = true
     visibility.addEventListener('visibilitychange', onVisibilityChange)
@@ -217,6 +236,8 @@ export function createWebWakeScheduler(options: WebWakeSchedulerOptions = {}): W
         visibility.removeEventListener('visibilitychange', onVisibilityChange)
       }
       listening = false
+      stopClockChanges?.()
+      stopClockChanges = null
     },
   }
 }

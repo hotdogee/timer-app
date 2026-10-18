@@ -1,0 +1,51 @@
+# Local settings for `pnpm server:dev` (wrangler dev). Copy this file to `.dev.vars` (gitignored)
+# and fill in what you need; never commit real values. In production these are Worker secrets
+# (`wrangler secret put <NAME>`, see docs/deploy.md), except APP_ENV, which wrangler.jsonc sets.
+#
+# `pnpm server:types` reads this file to type the bindings: the uncommented names are typed as
+# always-present strings. The optional settings stay commented out; the server declares them as
+# optional and treats a missing or empty value as "not configured".
+
+# Server mode: `development` or `production` (the default in wrangler.jsonc). Development turns on
+# GET /__dev/otp?email=, which returns the last sign-in code sent to that address (for e2e tests).
+APP_ENV=development
+
+# Better Auth signing secret: a random string of at least 32 characters, for example the output
+# of `openssl rand -base64 32`. This placeholder only works locally.
+BETTER_AUTH_SECRET=change-me-to-a-random-string-of-32-or-more-characters
+
+# The public origin the browser talks to. In development that is Vite (which proxies /api and
+# /__dev to wrangler dev on port 8787); use http://localhost:8787 when wrangler dev serves dist/.
+BETTER_AUTH_URL=http://localhost:5173
+
+# Optional: more origins allowed to call the auth API, comma-separated (the BETTER_AUTH_URL origin
+# is always allowed).
+# TRUSTED_ORIGINS=http://localhost:4173,http://localhost:8787
+
+# Optional mailer (Resend, https://resend.com). Without RESEND_API_KEY, in development the sign-in
+# code is printed to the wrangler console instead of being emailed; in production code requests
+# fail. EMAIL_FROM must be on a domain verified in Resend (Resend's test sender
+# onboarding@resend.dev only mails the account owner).
+# RESEND_API_KEY=
+# EMAIL_FROM=Timer App <no-reply@example.com>
+# Most sign-in code emails a day (UTC) while RESEND_API_KEY is set, to stay within the Resend plan;
+# 100 (the free plan) when unset. Each address also gets at most 5 codes an hour.
+# EMAIL_DAILY_LIMIT=100
+
+# Optional Google sign-in (Google Cloud Console › OAuth client, type "Web application").
+# Redirect URI: <BETTER_AUTH_URL>/api/auth/callback/google
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+
+# Optional GitHub sign-in (GitHub › Settings › Developer settings › OAuth Apps).
+# Callback URL: <BETTER_AUTH_URL>/api/auth/callback/github
+# GITHUB_CLIENT_ID=
+# GITHUB_CLIENT_SECRET=
+
+# Optional Apple sign-in (needs an HTTPS domain; Apple rejects localhost). APPLE_CLIENT_ID is the
+# Services ID; the server signs its client secret from the team id, key id and the .p8 key.
+# Put the key on one line with \n for the line breaks, in double quotes.
+# APPLE_CLIENT_ID=
+# APPLE_TEAM_ID=
+# APPLE_KEY_ID=
+# APPLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"

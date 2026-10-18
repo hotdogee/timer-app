@@ -20,7 +20,7 @@
  */
 import { untrack } from 'svelte'
 
-import { cards, systemClock, timer, type Clock, type EpochMs, type Ms } from '../core'
+import { cards, timer, type Clock, type EpochMs, type Ms } from '../core'
 import { m } from '../i18n'
 import {
   DEFAULT_SOUND,
@@ -31,6 +31,7 @@ import {
   type SoundId,
 } from '../platform'
 import { frameClock } from '../ui/frame-clock.svelte'
+import { appClock } from './app-clock'
 import type { CardStore } from './cards.svelte'
 
 /** The card store actions the alarm uses. */
@@ -69,7 +70,7 @@ export interface AlarmOptions {
    * Defaults to {@link DEFAULT_ALARM_SETTINGS}.
    */
   readonly settings?: (() => AlarmSettings) | undefined
-  /** The time, for auto-stop. Defaults to the system clock (the frame clock's source). */
+  /** The time, for auto-stop. Defaults to the app clock (the frame clock's source). */
   readonly clock?: Clock | undefined
   /** Reads the clock for a wake-up and returns that `now`. Defaults to bumping the frame clock. */
   readonly bump?: (() => EpochMs) | undefined
@@ -144,7 +145,7 @@ export function createAlarmCore(
   options: AlarmOptions = {},
 ): AlarmCore {
   const readSettings = options.settings ?? (() => DEFAULT_ALARM_SETTINGS)
-  const clock = options.clock ?? systemClock
+  const clock = options.clock ?? appClock
   const bump = options.bump ?? frameNow
   /**
    * Notifications by card id while the card rings: on screen, or null when the platform refused

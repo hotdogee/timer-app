@@ -21,6 +21,11 @@
 
   While a card is fullscreen it follows the selection, so the keys always act on the card in view;
   as the overlay (no Fullscreen API) everything else is inert, as native fullscreen makes it.
+
+  Accounts (main.ts starts the session check and the sync connection): while signed in, the action
+  bar shows the sync status as a cloud that opens Settings › Account, which is also where the app
+  opens after a provider sign-in that failed, so its message is seen. Times the app stamps (the
+  export's date included) are app time, which follows the server's clock while signed in.
 -->
 <script lang="ts">
   import { tick, untrack } from 'svelte'
@@ -30,7 +35,9 @@
   import { FALLBACK_ATTRIBUTE, platform } from './platform'
   import { applyUpdate, dismissOfflineReady, dismissUpdate, pwaState } from './pwa.svelte'
   import { createAlarm } from './state/alarm.svelte'
+  import { appClock } from './state/app-clock'
   import type { AppData } from './state/app-data.svelte'
+  import { authStore } from './state/auth.svelte'
   import { cardStore } from './state/cards.svelte'
   import {
     createKeyboardController,
@@ -39,6 +46,7 @@
   } from './state/keyboard.svelte'
   import { presetStore } from './state/presets.svelte'
   import { settingsStore } from './state/settings.svelte'
+  import { remoteSync } from './sync/remote.svelte'
   import Announcer from './ui/Announcer.svelte'
   import { announce } from './ui/announce.svelte'
   import ConfirmDialog from './ui/ConfirmDialog.svelte'
@@ -85,6 +93,10 @@
    */
   let settingsUi = $state.raw<typeof SettingsUi | null>(null)
   let settingsLoading = false
+  /** The section the settings dialog shows; kept between openings. */
+  let settingsSection = $state<SettingsUi.SectionId>('appearance')
+  /** The action bar's ⚙, where focus goes when Settings closes and its opener is gone. */
+  let settingsButton = $state<HTMLButtonElement>()
   /** The card waiting for "Delete …?" to be answered (Confirm before delete). */
   let pendingDelete = $state.raw<{ readonly id: cards.CardId; readonly name: string } | null>(null)
   let confirmOpen = $state(false)
@@ -287,9 +299,13 @@
     helpOpen = true
   }
 
-  /** Opens the settings dialog (⚙, Mod+, or the palette), loading it the first time. */
-  function openSettings(): void {
+  /**
+   * Opens the settings dialog (⚙, Mod+, or the palette) on the last section shown, or on `section`
+   * (the sync status button opens Account), loading it the first time.
+   */
+  function openSettings(section?: SettingsUi.SectionId): void {
     closeOverlays()
+    if (section !== undefined) settingsSection = section
     settingsOpen = true
     if (settingsUi !== null || settingsLoading) return
     settingsLoading = true
@@ -305,6 +321,26 @@
       },
     )
   }
+
+  /**
+   * Settings closed: the dialog gives focus back to whatever opened it. When that is gone (the
+   * cloud button, removed by signing out or deleting the account in Settings › Account), focus
+   * would fall to the page; it goes to ⚙ instead, in the same place in the action bar.
+   */
+  function settingsClosed(): void {
+    void tick().then(() => {
+      const active = document.activeElement
+      if (active === null || active === document.body) settingsButton?.focus()
+    })
+  }
+
+  // ── Account ──────────────────────────────────────────────────────────────────────────────
+  /** The sync status for the action bar's cloud, while signed in; null hides the cloud. */
+  const syncStatus = $derived(authStore.status === 'signed-in' ? remoteSync.status : null)
+
+  // Back from a provider sign-in that failed or was cancelled (main.ts started the auth state,
+  // which read the failure off the URL): show Settings › Account, where the message is.
+  if (untrack(() => authStore.error) === 'oauth') openSettings('account')
 
   // ── Delete, with "Confirm before delete" ─────────────────────────────────────────────────
   /**
@@ -414,7 +450,7 @@
   function exportData(ui: typeof SettingsUi): void {
     ui.downloadExport(
       exportFormat.createExport({
-        exportedAt: Date.now(),
+        exportedAt: appClock(),
         cards: cardStore.cards,
         presets: presetStore.presets,
         settings: { synced: settingsStore.synced, device: settingsStore.device },
@@ -463,8 +499,15 @@
     <ActionBar
       {editing}
       ontoggleedit={toggleEditMode}
-      onopensettings={openSettings}
+      onopensettings={() => {
+        openSettings()
+      }}
       bind:menuOpen={timerMenuOpen}
+      {syncStatus}
+      onopenaccount={() => {
+        openSettings('account')
+      }}
+      bind:settingsButton
     />
 
     <div class="snackbar-host" bind:this={snackbarHost}>
@@ -525,6 +568,8 @@
   {@const ui = settingsUi}
   <ui.SettingsDialog
     bind:open={settingsOpen}
+    bind:section={settingsSection}
+    onclose={settingsClosed}
     {settingsStore}
     {presetStore}
     cardCount={cardStore.cards.length}

@@ -34,6 +34,10 @@ const REQUIRED: readonly IconName[] = [
   'arrow_forward',
   'arrow_upward',
   'arrow_downward',
+  // M4: the sync status in the action bar.
+  'cloud_done',
+  'cloud_off',
+  'cloud_sync',
 ]
 
 describe('icons', () => {

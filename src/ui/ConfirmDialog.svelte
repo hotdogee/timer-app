@@ -5,7 +5,8 @@
   or a backdrop click cancel. Confirming closes the dialog first, so focus is back where it was
   (the card or its delete button) before `onconfirm` runs, and whatever `onconfirm` removes hands
   focus on as usual. The modal dialog makes the page inert, so it carries its own copy of the
-  app's live region.
+  app's live region. It sets its own padding: it may open inside the settings dialog (Data's
+  import question), whose zero padding would be inherited.
 
   ```svelte
   <ConfirmDialog
@@ -93,7 +94,7 @@
   role="alertdialog"
   aria-labelledby={headingId}
   aria-describedby={message ? messageId : undefined}
-  style="--dialog-width: 22rem"
+  style="--dialog-width: 22rem; --dialog-padding: 1.5rem"
   onclose={handleClose}
   onkeydown={handleKeydown}
 >
