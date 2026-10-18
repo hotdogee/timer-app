@@ -46,16 +46,8 @@ pnpm server:migrate:remote
 
 The public address is `BETTER_AUTH_URL` below. Sign-in providers call back to it, and the session cookie belongs to it, so pick it before setting up the providers; changing it later means updating each provider.
 
-- **Custom domain** (recommended, required for Apple): add a route to `server/wrangler.jsonc`, and Cloudflare creates the DNS record and the certificate on the next deploy:
-
-  ```jsonc
-  "routes": [{ "pattern": "timer.example.com", "custom_domain": true }],
-  // Optional, once the domain works: stop serving the same app on the workers.dev address too.
-  "workers_dev": false,
-  ```
-
-  (A custom domain added in the dashboard, Workers & Pages › timer-app › Settings › Domains & Routes, works too, but the config file keeps it with the code.)
-- **workers.dev**: the Worker is also served at `https://timer-app.<your-subdomain>.workers.dev`, with no setup.
+- **Custom domain** (recommended, required for Apple): after the first deploy, add it in the dashboard: Workers & Pages › timer-app › Settings › Domains & Routes › Add › Custom domain › `timer.example.com`. Cloudflare creates the DNS record and the certificate within a minute, and later deploys keep the domain. Do not put a `routes` entry in `server/wrangler.jsonc` for it: `wrangler dev` then rewrites every local request URL to that host, and Better Auth refuses them (the end-to-end tests fail with "Invalid origin").
+- **workers.dev**: `server/wrangler.jsonc` sets `workers_dev: false`, so the Worker is served on the custom domain only and the session cookie has one origin. To try a deploy before the domain is set up, set it to `true` temporarily: the Worker is then also served at `https://timer-app.<your-subdomain>.workers.dev`, with no setup.
 
 The examples below use `https://timer.example.com`.
 
