@@ -60,6 +60,8 @@ export const PACKAGE_IDENTIFIER = 'Hotdogee.TimerApp'
 
 /** The manifests' schema version (also written in each template). */
 export const MANIFEST_VERSION = '1.12.0'
+/** `winget validate`'s exit code for "Manifest validation succeeded with warnings". */
+const VALIDATION_WARNINGS = 0x8a150028
 
 /** The winget templates, relative to the repository root. */
 export const WINGET_TEMPLATE_DIR = 'packaging/winget/Hotdogee.TimerApp'
@@ -606,10 +608,18 @@ export async function main(argv, context = {}) {
       try {
         out(winget(['validate', '--manifest', dir, '--disable-interactivity']).trim())
       } catch (error) {
-        // 0x8A150028 is "validation succeeded with warnings": still a failure here, since the
-        // winget repository's checks report the same warnings.
         const code = typeof error?.status === 'number' ? error.status >>> 0 : null
         const output = [error?.stdout, error?.stderr].filter(Boolean).join('\n').trim()
+        if (code === VALIDATION_WARNINGS) {
+          // "Validation succeeded with warnings": the manifests are valid. The warnings are shown
+          // (as GitHub annotations under Actions) for the submitter to judge; the winget repository
+          // runs its own checks on the pull request. Some winget builds warn about the schema header
+          // comment that others accept, so a warning must not fail a release.
+          for (const line of output.split('\n').filter((l) => l.trim() !== '')) {
+            err(process.env.GITHUB_ACTIONS ? `::warning::${line}` : line)
+          }
+          return 0
+        }
         const status = code === null ? '' : ` (exit 0x${code.toString(16).toUpperCase()})`
         throw new ReleaseError(`winget validate failed${status}:\n${output || String(error)}`)
       }

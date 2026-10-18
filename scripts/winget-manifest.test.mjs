@@ -419,7 +419,7 @@ describe('the CLI', () => {
     expect(installer).not.toContain('arm64')
   })
 
-  it('--validate runs winget validate and fails on its warnings too', async () => {
+  it('--validate runs winget validate, passes with warnings shown, and fails on errors', async () => {
     const root = fixture()
     const calls = []
     const ok = await run(['--placeholder', '--out', 'out', '--validate'], {
@@ -439,8 +439,20 @@ describe('the CLI', () => {
         })
       },
     })
-    expect(warned.code).toBe(1)
-    expect(warned.err).toMatch(/winget validate failed \(exit 0x8A150028\):\nManifest Warning/)
+    expect(warned.code).toBe(0)
+    expect(warned.err).toMatch(/^Manifest Warning: …$/m)
+    expect(warned.err).not.toMatch(/winget validate failed/)
+    const failed = await run(['--placeholder', '--out', 'out', '--validate'], {
+      root,
+      winget: () => {
+        throw Object.assign(new Error('failed'), {
+          status: 0x8a150002,
+          stdout: 'Manifest Error: Required field missing.',
+        })
+      },
+    })
+    expect(failed.code).toBe(1)
+    expect(failed.err).toMatch(/winget validate failed \(exit 0x8A150002\):\nManifest Error/)
   })
 
   it('takes --version and --repo instead of the app’s own', async () => {
