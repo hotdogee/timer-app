@@ -1,0 +1,871 @@
+name: Release
+
+# Builds the desktop app for every platform, publishes a GitHub Release with the updater manifest
+# (latest.json), then deploys the web app and the sync server and updates winget and Homebrew.
+# docs/release.md is the checklist; `pnpm release` bumps the version and tags the commit.
+#
+# - A pushed `vX.Y.Z` tag releases that commit. It must be on main, carry the app's version
+#   (`pnpm version:check --tag`) and have a CHANGELOG.md section.
+# - Actions › Release › Run workflow (workflow_dispatch) is a dry run by default: everything is
+#   built (installers kept as workflow artifacts for 90 days), nothing is published, and a Store
+#   installer is built too. With dry_run off and a tag, it releases that tag, e.g. when its push
+#   run failed before the release was published.
+#
+# Every credential is optional: a missing secret leaves its step out and the release still ships
+# (unsigned Windows installers, ad-hoc signed macOS apps, no updater manifest). The verify job's
+# summary lists which are present. Secrets reach only the steps that use them, never `pull_request`
+# runs (this workflow has no such trigger) nor forks. The jobs that hold the signing keys (verify,
+# desktop, store-installer) run in the `release` environment: keep the TAURI_*, AZURE_* and APPLE_*
+# secrets there, with a deployment rule for main and v* tags, and a run from any other branch stops
+# at verify (docs/release.md › Secrets).
+#
+# Every action is pinned to a commit (its version in the comment; Dependabot bumps them), so a
+# moved tag cannot put new code next to those keys.
+#
+# Asset names follow `releaseAssetNamePattern` below (scripts/check-latest-json.mjs holds the same
+# pattern; a test keeps them equal): timer-app_<version>_<windows|darwin|linux>_<arch><-setup?>.<ext>.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Dry run (build everything, publish nothing)
+        type: boolean
+        default: true
+      tag:
+        description: Tag to build (vX.Y.Z); required unless this is a dry run of the chosen branch
+        type: string
+        required: false
+        default: ''
+
+run-name: Release ${{ inputs.tag || github.ref_name }}${{ inputs.dry_run && ' (dry run)' || '' }}
+
+permissions:
+  contents: read
+
+# One run per tag (or branch, for dry runs without one); a release is never cancelled half-way.
+# Dry runs queue in a group of their own, so one can never cancel a release waiting for its turn
+# (GitHub keeps one pending run per group). On a push `inputs` is empty: release-vX.Y.Z.
+concurrency:
+  group: release-${{ inputs.dry_run && 'dry-' || '' }}${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+# artifact-signing-cli (tauri.release.windows.json's signCommand), the release's prebuilt exe,
+# pinned with its SHA-256 digest.
+env:
+  ARTIFACT_SIGNING_CLI_URL: https://github.com/Levminer/artifact-signing-cli/releases/download/0.11.0/artifact-signing-cli.exe
+  ARTIFACT_SIGNING_CLI_SHA256: ddc6f6ef68631bf367ad051d7d37109e58d46095406e1fbba60d553b10f94393
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-24.04
+    # Where the signing secrets live (see the top), so the checks below see them.
+    environment: release
+    timeout-minutes: 30
+    # Which optional credentials exist (true/false only; secrets cannot be tested in `if`).
+    env:
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      # artifact-signing-cli needs all five; the verify job stops when only some are set.
+      HAS_AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET != '' }}
+      HAS_AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID != '' }}
+      HAS_AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT != '' }}
+      HAS_AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE != '' }}
+      HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_APPLE_NOTARIZATION: ${{ (secrets.APPLE_API_KEY != '' && secrets.APPLE_API_ISSUER != '' && secrets.APPLE_API_PRIVATE_KEY != '') || (secrets.APPLE_ID != '' && secrets.APPLE_PASSWORD != '' && secrets.APPLE_TEAM_ID != '') }}
+      HAS_WINGET_TOKEN: ${{ secrets.WINGET_TOKEN != '' }}
+      HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+      # The Cloudflare token may live in the `production` environment, which this workflow cannot
+      # see: then set the repository variable DEPLOY_ON_RELEASE to true.
+      DEPLOY_WEB: ${{ secrets.CLOUDFLARE_API_TOKEN != '' || vars.DEPLOY_ON_RELEASE == 'true' }}
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      dry_run: ${{ steps.release.outputs.dry_run }}
+      sha: ${{ steps.version.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
+      origin: ${{ steps.origin.outputs.origin }}
+      updater: ${{ steps.updater.outputs.updater }}
+      windows_signing: ${{ steps.windows.outputs.signing }}
+      macos_signing: ${{ steps.credentials.outputs.macos_signing }}
+      macos_notarization: ${{ steps.credentials.outputs.macos_notarization }}
+      deploy: ${{ steps.credentials.outputs.deploy }}
+    steps:
+      - name: Resolve the release
+        id: release
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$EVENT" = push ]; then
+            tag="$GITHUB_REF_NAME" dry_run=false ref="$GITHUB_REF"
+          else
+            tag="$INPUT_TAG" dry_run="$INPUT_DRY_RUN" ref="$GITHUB_REF"
+            if [ -n "$tag" ]; then ref="refs/tags/$tag"; fi
+          fi
+          if [ -n "$tag" ] && ! [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::$tag is not a release tag: use vX.Y.Z, as pnpm release creates"
+            exit 1
+          fi
+          if [ "$dry_run" != true ] && [ -z "$tag" ]; then
+            echo "::error::A release needs a tag: push vX.Y.Z, or run this with a tag (or as a dry run)"
+            exit 1
+          fi
+          {
+            echo "tag=$tag"
+            echo "dry_run=$dry_run"
+            echo "ref=$ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.release.outputs.ref }}
+          # The whole history, to check that a release commit is on the default branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Installs the pnpm version pinned in package.json's packageManager field.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the version, the tag and the branch
+        id: version
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # package.json, tauri.conf.json, Cargo.toml and Cargo.lock agree, and the tag names it.
+          if [ -n "$TAG" ]; then pnpm version:check --tag "$TAG"; else pnpm version:check; fi
+          if [ "$DRY_RUN" = false ] && ! git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"; then
+            echo "::error::$TAG is not on $DEFAULT_BRANCH: release from $DEFAULT_BRANCH only"
+            exit 1
+          fi
+          # Publishing marks the release as latest, which the updater's endpoint follows.
+          # (gh prints the error body on stdout: none yet is a 404.)
+          if ! latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> /dev/null)"; then
+            latest=''
+          fi
+          if [ "$DRY_RUN" = false ] && [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] &&
+            ! node --input-type=module -e "import { compareVersions } from './scripts/release.mjs'
+              process.exit(compareVersions(process.argv[1].slice(1), process.argv[2].slice(1)) > 0 ? 0 : 1)" \
+              "$TAG" "$latest"; then
+            echo "::error::$TAG is not newer than the latest release, $latest"
+            exit 1
+          fi
+          if [ -n "$TAG" ]; then
+            # The release's notes: its CHANGELOG.md section, which pnpm release writes.
+            node scripts/release-notes.mjs "$TAG" > /dev/null
+          fi
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "version=$(node -p 'require("./package.json").version')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check the sync server
+        id: origin
+        env:
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+        run: |
+          # The one https origin the CSP and the browser opener allow (release builds refuse http).
+          origin="$(node scripts/release.mjs --print-origin)"
+          pnpm version:check --origin "$origin"
+          host="${origin#https://}"
+          host="${host%%[:/]*}"
+          case "$host" in
+            example.com | example.net | example.org | *.example.com | *.example.net | *.example.org | *.example | *.test | *.invalid | *.localhost | localhost)
+              if [ "$DRY_RUN" = false ]; then
+                echo "::error::The sync server is still the placeholder $origin: set the production domain first (spec Q13)"
+                exit 1
+              fi
+              echo "::warning::The sync server is the placeholder $origin; a release would stop here (spec Q13)"
+              ;;
+          esac
+          echo "origin=$origin" >> "$GITHUB_OUTPUT"
+
+      - name: Check the updater keys
+        id: updater
+        env:
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+        run: |
+          if [ "$HAS_UPDATER_KEY" = true ]; then
+            # Signatures the app cannot verify would break every later update.
+            pnpm version:check --updater-key
+            echo "updater=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if node scripts/release.mjs --check --updater-key > /dev/null 2>&1; then
+            message="The app has an updater public key but TAURI_SIGNING_PRIVATE_KEY is not set: the release would have no latest.json, and installed apps could not update"
+            if [ "$DRY_RUN" = false ]; then
+              echo "::error::$message"
+              exit 1
+            fi
+            echo "::warning::$message"
+          fi
+          echo "updater=false" >> "$GITHUB_OUTPUT"
+
+      # Signing turns on only with all five Azure secrets: with some missing, every Windows job
+      # would build in full and then fail at its first signature. Stops dry runs too.
+      - name: Check the Windows signing secrets
+        id: windows
+        run: |
+          present=() missing=()
+          for name in AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID \
+            AZURE_ARTIFACT_SIGNING_ACCOUNT AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE; do
+            flag="HAS_$name"
+            if [ "${!flag}" = true ]; then present+=("$name"); else missing+=("$name"); fi
+          done
+          if [ "${#present[@]}" -gt 0 ] && [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Windows signing needs all five Azure secrets; set ${missing[*]} too, or delete ${present[*]} to release unsigned"
+            exit 1
+          fi
+          if [ "${#missing[@]}" -eq 0 ]; then signing=true; else signing=false; fi
+          echo "signing=$signing" >> "$GITHUB_OUTPUT"
+
+      - name: Report the credentials
+        id: credentials
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          DRY_RUN: ${{ steps.release.outputs.dry_run }}
+          ORIGIN: ${{ steps.origin.outputs.origin }}
+          UPDATER: ${{ steps.updater.outputs.updater }}
+          WINDOWS_SIGNING: ${{ steps.windows.outputs.signing }}
+        run: |
+          {
+            echo "macos_signing=$HAS_APPLE_CERTIFICATE"
+            echo "macos_notarization=$HAS_APPLE_NOTARIZATION"
+            echo "deploy=$DEPLOY_WEB"
+          } >> "$GITHUB_OUTPUT"
+          yes_no() { if [ "$1" = true ]; then echo yes; else echo "no: $2"; fi; }
+          title="Release ${TAG:-of $GITHUB_REF_NAME}"
+          if [ "$DRY_RUN" = true ]; then title="$title (dry run: nothing is published)"; fi
+          {
+            echo "### $title"
+            echo
+            echo "| Part | Enabled |"
+            echo "|---|---|"
+            echo "| Sync server | $ORIGIN |"
+            echo "| Updater manifest | $(yes_no "$UPDATER" 'no TAURI_SIGNING_PRIVATE_KEY') |"
+            echo "| Windows signing | $(yes_no "$WINDOWS_SIGNING" 'no AZURE_* secrets, SmartScreen warns') |"
+            echo "| macOS signing | $(yes_no "$HAS_APPLE_CERTIFICATE" 'no APPLE_CERTIFICATE, ad-hoc signature') |"
+            echo "| macOS notarization | $(yes_no "$HAS_APPLE_NOTARIZATION" 'no APPLE_API_* nor APPLE_ID set') |"
+            echo "| winget submission | $(yes_no "$HAS_WINGET_TOKEN" 'no WINGET_TOKEN') |"
+            echo "| Homebrew tap update | $(yes_no "$HAS_TAP_TOKEN" 'no HOMEBREW_TAP_TOKEN') |"
+            echo "| Web deploy | $(yes_no "$DEPLOY_WEB" 'no CLOUDFLARE_API_TOKEN nor DEPLOY_ON_RELEASE') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The CI checks (ci.yml › web), so a tag never ships code that fails them.
+      - run: pnpm check
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm test:server
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      # Against the production build, served with the API by wrangler dev (E2E_SERVER=preview).
+      - run: pnpm test:e2e
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: playwright-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  create-release:
+    name: Create the draft release
+    needs: verify
+    if: needs.verify.outputs.dry_run == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.verify.outputs.tag }}
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      - name: Create or reuse the draft
+        id: release
+        run: |
+          notes="$RUNNER_TEMP/notes.md"
+          node scripts/release-notes.mjs "$TAG" --out "$notes"
+          title="Timer App $TAG"
+          # A draft left by an earlier run of this tag is reused; a published release never is.
+          if draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null)"; then
+            if [ "$draft" != true ]; then
+              echo "::error::$TAG is already published; release a new version instead"
+              exit 1
+            fi
+            gh release edit "$TAG" --title "$title" --notes-file "$notes"
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$title" --notes-file "$notes"
+          fi
+          echo "id=$(gh release view "$TAG" --json databaseId --jq .databaseId)" >> "$GITHUB_OUTPUT"
+
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    needs: [verify, create-release]
+    # create-release is skipped on dry runs, and only then.
+    if: >-
+      ${{ !cancelled() && needs.verify.result == 'success' &&
+      (needs.create-release.result == 'success' ||
+      (needs.create-release.result == 'skipped' && needs.verify.outputs.dry_run == 'true')) }}
+    runs-on: ${{ matrix.runner }}
+    environment: release
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # `updater` is the target's latest.json key; publish checks each (UPDATER_PLATFORMS).
+        include:
+          - name: Windows x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            updater: windows-x86_64
+          - name: Windows Arm64
+            runner: windows-2025
+            target: aarch64-pc-windows-msvc
+            updater: windows-aarch64
+          - name: macOS Apple Silicon
+            runner: macos-15
+            target: aarch64-apple-darwin
+            updater: darwin-aarch64
+          - name: macOS Intel
+            runner: macos-15
+            target: x86_64-apple-darwin
+            updater: darwin-x86_64
+          # Ubuntu 22.04 (glibc 2.35), so the Linux builds run on older distributions too. Its
+          # images retire on 2027-04-17 (brownouts in March): move to 24.04 before then.
+          - name: Linux x64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            updater: linux-x86_64
+          - name: Linux Arm64
+            runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            updater: linux-aarch64
+    env:
+      # Baked into the app (vite.config.ts); release builds refuse anything but https.
+      TIMER_SERVER_ORIGIN: ${{ needs.verify.outputs.origin }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      # Tauri's Linux prerequisites (tauri-action README), plus the GStreamer plugins the
+      # AppImage bundles for audio (bundle.linux.appimage.bundleMediaFramework).
+      - name: Install the Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # Pinned to the stable branch's commit: that fixes the action's code; rustup still installs
+      # the newest stable Rust (`toolchain`).
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # Restored from the default branch's caches; saved only by runs on it (dry runs), since a
+      # tag's own caches are never reused. One cache per target, shared with store-installer.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: release-${{ matrix.target }}
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+      - run: pnpm install --frozen-lockfile
+
+      # Azure Artifact Signing (tauri.release.windows.json's signCommand), the pinned prebuilt exe
+      # (ARTIFACT_SIGNING_CLI_* above). Needs .NET 8, the Azure CLI and signtool from the Windows
+      # SDK 10.0.26100, which the runner image has.
+      - name: Install the Windows signing tool
+        if: runner.os == 'Windows' && needs.verify.outputs.windows_signing == 'true'
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/artifact-signing-cli"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl --fail --silent --show-error --location --output artifact-signing-cli.exe "$ARTIFACT_SIGNING_CLI_URL"
+          echo "$ARTIFACT_SIGNING_CLI_SHA256  artifact-signing-cli.exe" | sha256sum --check --strict
+          cygpath --windows "$dir" >> "$GITHUB_PATH"
+
+      # The overlays (src-tauri/tauri.*.json, paths from the repository root) apply only when
+      # their credentials exist, so a build without secrets needs none.
+      - name: Choose the build configuration
+        id: config
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          UPDATER: ${{ needs.verify.outputs.updater }}
+          WINDOWS_SIGNING: ${{ needs.verify.outputs.windows_signing }}
+          MACOS_SIGNING: ${{ needs.verify.outputs.macos_signing }}
+        run: |
+          args="--target $TARGET"
+          if [ "$UPDATER" = true ]; then args="$args --config src-tauri/tauri.updater.json"; fi
+          if [ "$RUNNER_OS" = Windows ] && [ "$WINDOWS_SIGNING" = true ]; then
+            args="$args --config src-tauri/tauri.release.windows.json"
+          fi
+          # Apple Silicon needs some signature: ad hoc ("-") without a Developer ID certificate.
+          if [ "$RUNNER_OS" = macOS ] && [ "$MACOS_SIGNING" != true ]; then
+            args="$args --config src-tauri/tauri.release.macos-adhoc.json"
+          fi
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+          echo "tauri build $args"
+
+      # Tauri imports APPLE_CERTIFICATE into a temporary keychain itself and signs with its
+      # identity, then notarizes with an App Store Connect API key or an Apple ID. An empty
+      # variable counts as set for Tauri, so only the ones with values are exported, right before
+      # the build.
+      - name: Use the Apple signing credentials
+        if: runner.os == 'macOS' && needs.verify.outputs.macos_signing == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          put() {
+            if [ -z "$2" ]; then return 0; fi
+            delimiter="EOF_$(openssl rand -hex 16)"
+            printf '%s<<%s\n%s\n%s\n' "$1" "$delimiter" "$2" "$delimiter" >> "$GITHUB_ENV"
+          }
+          if [ -z "$APPLE_CERTIFICATE_PASSWORD" ]; then
+            echo "::error::APPLE_CERTIFICATE needs APPLE_CERTIFICATE_PASSWORD (export the .p12 with a password)"
+            exit 1
+          fi
+          put APPLE_CERTIFICATE "$(printf '%s' "$APPLE_CERTIFICATE" | tr -d '[:space:]')"
+          put APPLE_CERTIFICATE_PASSWORD "$APPLE_CERTIFICATE_PASSWORD"
+          put APPLE_SIGNING_IDENTITY "$APPLE_SIGNING_IDENTITY"
+          if [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_PRIVATE_KEY" ]; then
+            key_path="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY.p8"
+            printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key_path"
+            put APPLE_API_KEY "$APPLE_API_KEY"
+            put APPLE_API_ISSUER "$APPLE_API_ISSUER"
+            put APPLE_API_KEY_PATH "$key_path"
+          elif [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            put APPLE_ID "$APPLE_ID"
+            put APPLE_PASSWORD "$APPLE_PASSWORD"
+            put APPLE_TEAM_ID "$APPLE_TEAM_ID"
+          else
+            echo "::warning::Signed with the Developer ID but not notarized: Gatekeeper will block the app (set APPLE_API_* or APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID)"
+          fi
+
+      # Real runs upload the bundles and their .sig files to the draft by its id; publish writes
+      # latest.json from those once all six jobs are done (uploadUpdaterJson: false: the jobs
+      # would race to rewrite it). Dry runs get no release id and no token, so nothing can be
+      # published, and keep the bundles as workflow artifacts instead.
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ needs.verify.outputs.dry_run == 'false' && github.token || '' }}
+          # Updater signatures (only with tauri.updater.json; unused otherwise).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # artifact-signing-cli, on Windows only (tauri.release.windows.json; unused otherwise).
+          AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
+          AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ runner.os == 'Windows' && secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT || '' }}
+          AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ runner.os == 'Windows' && secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE || '' }}
+        with:
+          tauriScript: pnpm tauri
+          args: ${{ steps.config.outputs.args }}
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseAssetNamePattern: 'timer-app_[version]_[platform]_[arch][setup][ext]'
+          uploadUpdaterJson: false
+          retryAttempts: 1
+          uploadWorkflowArtifacts: ${{ needs.verify.outputs.dry_run == 'true' }}
+
+  publish:
+    name: Publish the release
+    needs: [verify, create-release, desktop]
+    if: needs.verify.outputs.dry_run == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.verify.outputs.tag }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      # Every desktop matrix target's latest.json key (a test keeps the two lists equal).
+      UPDATER_PLATFORMS: windows-x86_64,windows-aarch64,darwin-aarch64,darwin-x86_64,linux-x86_64,linux-aarch64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      # The updater's manifest, written once from the .sig assets the six desktop jobs uploaded
+      # (each entry: the signature and the bundle's download URL, public once the release is, and
+      # not rate-limited like the API's asset URLs), uploaded, then downloaded and checked again.
+      # A re-run finds the file and rewrites it only where it differs.
+      - name: Write and check latest.json
+        if: needs.verify.outputs.updater == 'true'
+        env:
+          NOTES: ${{ format('Release notes - https://github.com/{0}/releases/tag/{1}', github.repository, needs.verify.outputs.tag) }}
+        run: |
+          dir="$RUNNER_TEMP/release"
+          repaired="$RUNNER_TEMP/repaired/latest.json"
+          download() {
+            rm -rf "$dir"
+            mkdir -p "$dir/files"
+            gh release view "$TAG" --json assets --jq .assets > "$dir/assets.json"
+            gh release download "$TAG" --dir "$dir/files" --pattern '*.sig' --pattern latest.json
+          }
+          check() {
+            node scripts/check-latest-json.mjs --version "$VERSION" --tag "$TAG" \
+              --assets "$dir/assets.json" --dir "$dir/files" --platforms "$UPDATER_PLATFORMS" \
+              --tauri-config src-tauri/tauri.conf.json --notes "$NOTES" --download-urls "$@"
+          }
+          download
+          check --write "$repaired"
+          if [ -f "$repaired" ]; then
+            gh release upload "$TAG" "$repaired" --clobber
+            download
+            check
+          fi
+
+      - name: Publish the release
+        run: gh release edit "$TAG" --draft=false --latest
+
+      - name: Deploy the web app and the sync server
+        env:
+          DEPLOY: ${{ needs.verify.outputs.deploy }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$DEPLOY" != true ]; then
+            echo "::notice::Not deploying: no CLOUDFLARE_API_TOKEN secret nor DEPLOY_ON_RELEASE variable. Run Actions › Deploy with ref $TAG."
+            exit 0
+          fi
+          gh workflow run deploy.yml --ref "$DEFAULT_BRANCH" -f ref="$TAG"
+          echo "::notice::Started Deploy for $TAG; approve it if the production environment asks."
+
+  # After publishing; on dry runs too, with placeholder installers (render and validate only,
+  # nothing is submitted), so a dry run exercises the tooling.
+  winget:
+    name: winget
+    needs: [verify, publish]
+    if: >-
+      ${{ !cancelled() && needs.verify.result == 'success' &&
+      (needs.publish.result == 'success' ||
+      (needs.publish.result == 'skipped' && needs.verify.outputs.dry_run == 'true')) }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.verify.outputs.tag }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      # The published release's installers, or placeholders on a dry run.
+      SOURCE: ${{ needs.verify.outputs.dry_run == 'true' && 'placeholder' || 'release' }}
+      HAS_WINGET_TOKEN: ${{ secrets.WINGET_TOKEN != '' }}
+      # winget-create, pinned with its checksum (the release's SHA-256 digest).
+      WINGETCREATE_URL: https://github.com/microsoft/winget-create/releases/download/v1.12.13.0/wingetcreate.exe
+      WINGETCREATE_SHA256: 24042bd37915805615e6cf969ac57c6439124c3fe85823327f5f3fb24bd9ffea
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      # The runner image has no winget: Microsoft's documented bootstrap (as for Windows Sandbox).
+      # Only `winget validate` needs it, so a failure here skips the validation with a warning
+      # (winget-create checks the manifests again before it submits).
+      - name: Install winget
+        id: winget
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Install-PackageProvider -Name NuGet -Force | Out-Null
+          # Pinned, like every other tool in this workflow (bump it by hand).
+          Install-Module -Name Microsoft.WinGet.Client -RequiredVersion 1.29.380 -Force -Repository PSGallery | Out-Null
+          Repair-WinGetPackageManager -AllUsers
+          $apps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+          $env:Path = "$apps;$env:Path"
+          Add-Content -Path $env:GITHUB_PATH -Value $apps
+          winget --version
+
+      # The three manifests from packaging/winget, with the release's installers and checksums,
+      # checked by `winget validate`. They are the files for the first, manual submission.
+      - name: Render and validate the manifests
+        env:
+          WINGET_INSTALLED: ${{ steps.winget.outcome == 'success' }}
+        run: |
+          flags=()
+          if [ "$WINGET_INSTALLED" = true ]; then
+            flags+=(--validate)
+          else
+            echo "::warning::winget could not be installed: the manifests are not validated"
+          fi
+          node scripts/winget-manifest.mjs "--$SOURCE" --version "$VERSION" --out "$RUNNER_TEMP/winget" "${flags[@]}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: winget-manifests
+          path: ${{ runner.temp }}/winget
+          retention-days: 30
+
+      # Later versions: winget-create copies the package's manifests in microsoft/winget-pkgs with
+      # the new installers and opens the pull request (WINGET_TOKEN: a classic token with
+      # public_repo, read from WINGET_CREATE_GITHUB_TOKEN so it is never on a command line).
+      - name: Submit to winget-pkgs
+        if: needs.verify.outputs.dry_run == 'false'
+        env:
+          WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          # winget-create updates only a package that exists: the first version goes in by hand,
+          # with or without the token. (github.token can read the public repository.)
+          if checked="$(gh api repos/microsoft/winget-pkgs/contents/manifests/h/Hotdogee/TimerApp --silent 2>&1)"; then
+            listed_in_winget=true
+          elif [[ "$checked" == *"HTTP 404"* ]]; then
+            listed_in_winget=false
+          else
+            echo "::error::Could not check microsoft/winget-pkgs for Hotdogee.TimerApp: $checked"
+            exit 1
+          fi
+          if [ "$listed_in_winget" != true ]; then
+            echo "::notice::Hotdogee.TimerApp is not in winget-pkgs yet: download this run's winget-manifests artifact and submit it by hand with wingetcreate submit <folder> (docs/release.md › winget, step 1). Later releases are submitted here."
+            exit 0
+          fi
+          # `<url>|<arch>` per installer, as winget-create takes them.
+          listed="$(node scripts/winget-manifest.mjs --release --version "$VERSION" --print-urls)"
+          mapfile -t urls <<< "$listed"
+          if [ "$HAS_WINGET_TOKEN" != true ]; then
+            # Quoted, so the command can be pasted into a shell (`|` is a pipe there).
+            printf -v quoted ' "%s"' "${urls[@]}"
+            echo "::notice::WINGET_TOKEN is not set: nothing submitted. By hand: wingetcreate update Hotdogee.TimerApp --version $VERSION --urls$quoted --submit"
+            exit 0
+          fi
+          curl --fail --silent --show-error --location --output wingetcreate.exe "$WINGETCREATE_URL"
+          echo "$WINGETCREATE_SHA256  wingetcreate.exe" | sha256sum --check --strict
+          ./wingetcreate.exe update Hotdogee.TimerApp --version "$VERSION" --urls "${urls[@]}" \
+            --release-notes-url "https://github.com/$GH_REPO/releases/tag/$TAG" \
+            --prtitle "Hotdogee.TimerApp $VERSION" --submit --no-open
+
+  # After publishing; on dry runs too, with placeholder disk images (render and style only).
+  homebrew:
+    name: Homebrew
+    needs: [verify, publish]
+    if: >-
+      ${{ !cancelled() && needs.verify.result == 'success' &&
+      (needs.publish.result == 'success' ||
+      (needs.publish.result == 'skipped' && needs.verify.outputs.dry_run == 'true')) }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.verify.outputs.version }}
+      SOURCE: ${{ needs.verify.outputs.dry_run == 'true' && 'placeholder' || 'release' }}
+      TAP_REPO: ${{ github.repository_owner }}/homebrew-tap
+      HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+      NOTARIZED: ${{ needs.verify.outputs.macos_signing == 'true' && needs.verify.outputs.macos_notarization == 'true' }}
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ANALYTICS: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
+      # packaging/homebrew's template with the two DMGs' names and checksums; a caveat explains
+      # how to open the app when Apple has not notarized it.
+      - name: Render the cask
+        id: cask
+        run: |
+          flags=()
+          if [ "$NOTARIZED" != true ]; then flags+=(--not-notarized); fi
+          node scripts/update-cask.mjs "--$SOURCE" --version "$VERSION" --tap "$TAP_REPO" \
+            --out "$RUNNER_TEMP/timer-app.rb" "${flags[@]}"
+          # Homebrew's cask style rules apply to files in a Casks folder.
+          mkdir -p "$RUNNER_TEMP/style/Casks"
+          cp "$RUNNER_TEMP/timer-app.rb" "$RUNNER_TEMP/style/Casks/timer-app.rb"
+          brew style "$RUNNER_TEMP/style/Casks/timer-app.rb"
+          if gh api "repos/$TAP_REPO" --silent 2> /dev/null; then
+            echo "tap=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$TAP_REPO does not exist: create it (docs/release.md) to publish the cask."
+            echo "tap=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: homebrew-cask
+          path: ${{ runner.temp }}/timer-app.rb
+          retention-days: 30
+
+      # brew audits casks by name, so the new cask goes into a local clone of the tap first;
+      # --online also fetches the release's disk images.
+      - name: Audit the cask
+        if: needs.verify.outputs.dry_run == 'false' && steps.cask.outputs.tap == 'true'
+        run: |
+          tap="${TAP_REPO%%/*}/${TAP_REPO#*/homebrew-}"
+          brew tap "$tap"
+          casks="$(brew --repository "$tap")/Casks"
+          mkdir -p "$casks"
+          cp "$RUNNER_TEMP/timer-app.rb" "$casks/timer-app.rb"
+          brew audit --cask --online "$tap/timer-app"
+
+      - name: Push the cask to the tap
+        if: needs.verify.outputs.dry_run == 'false' && steps.cask.outputs.tap == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ "$HAS_TAP_TOKEN" != true ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set: copy the homebrew-cask artifact to $TAP_REPO/Casks/timer-app.rb by hand."
+            exit 0
+          fi
+          flags=()
+          if [ "$NOTARIZED" != true ]; then flags+=(--not-notarized); fi
+          node scripts/update-cask.mjs --release --version "$VERSION" --tap "$TAP_REPO" --push "${flags[@]}"
+
+  # The Microsoft Store listing points at an offline-WebView2 NSIS installer that we host
+  # (src-tauri/tauri.microsoftstore.conf.json); Partner Center submission is manual
+  # (docs/release.md). Built on every manual run and kept as a workflow artifact only.
+  store-installer:
+    name: Store installer (${{ matrix.name }})
+    needs: verify
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-2025
+    environment: release
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x64
+            target: x86_64-pc-windows-msvc
+          - name: Arm64
+            target: aarch64-pc-windows-msvc
+    env:
+      TIMER_SERVER_ORIGIN: ${{ needs.verify.outputs.origin }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      # Pinned to the stable branch's commit: that fixes the action's code; rustup still installs
+      # the newest stable Rust (`toolchain`).
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # The desktop job's cache for the target, restored only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: release-${{ matrix.target }}
+          save-if: false
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install the Windows signing tool
+        if: needs.verify.outputs.windows_signing == 'true'
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/artifact-signing-cli"
+          mkdir -p "$dir"
+          cd "$dir"
+          curl --fail --silent --show-error --location --output artifact-signing-cli.exe "$ARTIFACT_SIGNING_CLI_URL"
+          echo "$ARTIFACT_SIGNING_CLI_SHA256  artifact-signing-cli.exe" | sha256sum --check --strict
+          cygpath --windows "$dir" >> "$GITHUB_PATH"
+
+      - name: Choose the build configuration
+        id: config
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          WINDOWS_SIGNING: ${{ needs.verify.outputs.windows_signing }}
+        run: |
+          args="--target $TARGET --config src-tauri/tauri.microsoftstore.conf.json"
+          if [ "$WINDOWS_SIGNING" = true ]; then args="$args --config src-tauri/tauri.release.windows.json"; fi
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+          echo "tauri build $args"
+
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERTIFICATE_PROFILE }}
+        with:
+          tauriScript: pnpm tauri
+          args: ${{ steps.config.outputs.args }}
+          uploadUpdaterJson: false
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: 'microsoft-store-[platform]-[arch]-[bundle]'

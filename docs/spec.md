@@ -191,7 +191,7 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 | M3 | TinyBase stores on IndexedDB, settings and themes, i18n (en, zh-TW, ja), PWA | Done 2026-10-18 |
 | M4 | Sync server on Cloudflare Workers, Better Auth, sign-in flows | Done 2026-10-18 |
 | M5 | Desktop: tray, background alarms, mini window, global hotkeys, updater, autostart | Done 2026-10-18 |
-| M6 | Release: signing, CI builds, GitHub Releases, winget, Homebrew, Microsoft Store | Planned |
+| M6 | Release: signing, CI builds, GitHub Releases, winget, Homebrew, Microsoft Store | Done 2026-10-18 (pipeline; the first release waits on the owner's checklist in [release.md](release.md)) |
 
 ## Open questions
 
@@ -199,7 +199,9 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 
 - **(Q23)** Privacy policy. `docs/privacy.md` is a draft with operator and contact placeholders; fill them in, have it reviewed and publish it before the first public release.
 
-New questions continue from Q24.
+- **(Q24)** Release prerequisites only the owner can settle, listed in [release.md › QA checklist](release.md#qa-checklist-for-the-owner): the Windows signing route, the Apple Developer Program, the updater key, the winget and Homebrew accounts, the Microsoft Store listing, the Cloudflare account, the first version number, and the `release` environment and rulesets on GitHub.
+
+New questions continue from Q25.
 
 ## Decisions
 
@@ -247,5 +249,7 @@ New questions continue from Q24.
 | 2026-10-18 | — | Client sync: a "Sync this device" switch (device-only, back on after sign-out); sync starts after the first clock measurement; first-run seed rows are stamped at time zero so the account's edits and deletions beat a fresh device's defaults; a timer's settle to ringing is stamped right after its running stamp so it never undoes a later dismiss; the session is re-checked on a 4401 close or three failed connects. Pages get `frame-ancestors 'none'`, nosniff and a referrer policy through `public/_headers`. |
 | 2026-10-18 | — | Desktop shell (M5): Tauri plugins single-instance, window-state, notification, global-shortcut, autostart, updater, process and opener, plus the core tray. Tray menu: Show, Start or pause the last card, Quit. Close policy per Settings › Desktop; the default hides while anything runs or the mini window is open. The OS accent seeds the theme and follows changes on Windows (Q20 done). The web worker wake scheduler is enough on desktop: no Rust alarm scheduler. |
 | 2026-10-18 | — | Mini window: a Tauri window at `/mini?card=` (320×200 by default, undecorated, on top by default, position remembered, 32 px controls); Document Picture-in-Picture on the web; `/mini` also works as a plain page without the pin. |
-| 2026-10-18 | — | Desktop sign-in: device authorization through the system browser (no deep link); the 30-day bearer token is kept in the app's local storage unencrypted, an accepted risk until M6 moves it to the OS credential store; signing out while offline still drops it. Provider buttons are hidden on desktop. |
-| 2026-10-18 | — | Updater: wired with a placeholder public key, so this build reports "not configured" until M6 supplies the key; Settings › About has Check for updates and the update prompt offers Install and restart. Capabilities are per window with an app ACL (every command granted explicitly); the debug-only smoke command exists only in debug builds; the opener may open only the device page and https URLs. |
+| 2026-10-18 | — | Desktop sign-in: device authorization through the system browser (no deep link); the 30-day bearer token lives in the OS credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service) since M6, with a one-time migration from the device store, and falls back to the device store only when the OS store is unavailable; signing out, even offline, removes it. Provider buttons are hidden on desktop. |
+| 2026-10-18 | — | Updater: wired with a placeholder public key, so this build reports "not configured" until the owner adds the updater key; Settings › About has Check for updates and the update prompt offers Install and restart. Capabilities are per window with an app ACL (every command granted explicitly); the debug-only smoke command exists only in debug builds; the opener may open only the device page and https URLs. |
+| 2026-10-18 | — | Release pipeline (M6): `pnpm release <patch\|minor\|major\|x.y.z>` bumps the one version in package.json, tauri.conf.json, Cargo.toml and Cargo.lock, writes the CHANGELOG section and, with `--commit`, tags `vX.Y.Z`; versions are plain x.y.z within the MSI limits. A pushed `v*` tag runs `release.yml`: verify (the CI checks plus version, origin and updater-key checks) → draft release → six desktop legs (Windows x64 and Arm64, macOS Apple Silicon and Intel, Linux x64 and Arm64) → publish writes `latest.json` with download URLs and un-drafts → winget, Homebrew tap and the web deploy. Signing activates only when secrets exist (all five `AZURE_*` for Windows, `APPLE_*` for macOS, else ad-hoc; Linux ships unsigned); dry runs upload workflow artifacts and never publish. Runners are pinned images, actions are SHA-pinned with Dependabot, secrets live in the `release` environment. |
+| 2026-10-18 | — | Desktop hardening (M6): a real content security policy (self, the IPC origin, the sync origin, the two avatar hosts); `tauri dev` does not apply it, so it is verified against a local-server build. The opener scope is the device page and the sync origin only. Installers show the MIT license page; NSIS follows the OS language. `requireSignedVersion` is recommended on once the updater key exists. |

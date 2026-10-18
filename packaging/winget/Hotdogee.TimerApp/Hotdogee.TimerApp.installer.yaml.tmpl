@@ -1,0 +1,20 @@
+{{notice}}
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.28.0.schema.json
+
+PackageIdentifier: {{package_identifier}}
+PackageVersion: {{version}}
+InstallerType: nullsoft
+Scope: user
+InstallModes:
+- interactive
+- silent
+- silentWithProgress
+UpgradeBehavior: install
+ProductCode: {{product_code}}
+ReleaseDate: {{release_date}}
+InstallationMetadata:
+  DefaultInstallLocation: {{install_location}}
+Installers:
+{{installers}}
+ManifestType: installer
+ManifestVersion: 1.28.0

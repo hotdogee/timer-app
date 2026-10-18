@@ -1,0 +1,8 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https://avatars.githubusercontent.com https://*.googleusercontent.com; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://timer.example.com wss://timer.example.com http://localhost:8787 ws://localhost:8787; worker-src 'self'; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
+    }
+  }
+}

@@ -168,7 +168,7 @@ export function dismissOfflineReady(): void {
 /**
  * Where the desktop app's self-update stands:
  * - `idle`: not checked yet;
- * - `unconfigured`: this build cannot update itself (it has no updater key; until M6);
+ * - `unconfigured`: this build cannot update itself (it has no updater key yet);
  * - `checking`, then `none` (no update found), `check-failed` (the check got no answer: the
  *   server is down, say), `offline` (not checked: no connection) or `available` (`info` is the
  *   update);

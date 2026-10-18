@@ -1,6 +1,7 @@
 /**
  * The desktop services' interfaces (M5): the mini window, global hotkeys, launch at login, the
- * updater, activity reporting to the shell, and opening URLs in the system browser. Each has a web
+ * updater, activity reporting to the shell, and opening URLs in the system browser; since M6 also
+ * the sign-in token in the OS credential store. Each has a web
  * implementation in `index.ts` (unsupported or a plain browser call) and a Tauri one in
  * `tauri/`, loaded through dynamic `import()` on first use, so the web bundle ships no Tauri code.
  *
@@ -10,9 +11,9 @@
  * a way that will not get better, turns itself off: `supported` reads false from then on, so the
  * UI hides or disables its controls the next time it draws them.
  */
-import type { CloseBehavior, HotkeyId } from '../core/settings'
+import type { CloseBehavior, DeviceAuth, HotkeyId } from '../core/settings'
 
-export type { CloseBehavior, HotkeyId } from '../core/settings'
+export type { CloseBehavior, DeviceAuth, HotkeyId } from '../core/settings'
 
 /**
  * Draws card `cardId` into `target`, an element in another window (the web's Document
@@ -135,7 +136,8 @@ export interface UpdateProgress {
 
 /**
  * The desktop app's self-update (Tauri updater with signed update manifests). Builds without the
- * signing key (until M6) are not configured: they never find an update.
+ * updater key (until the owner adds it: docs/release.md › Updater key) are not configured: they
+ * never find an update.
  */
 export interface Updater {
   /** Whether this platform can update itself at all: the desktop app. False on the web. */
@@ -194,4 +196,30 @@ export interface Opener {
    * call. A refused URL does not turn the opener off. Never rejects.
    */
   open(url: string): Promise<boolean>
+}
+
+/**
+ * The desktop sign-in's bearer token in the OS credential store (M6): the Windows Credential
+ * Manager, the macOS Keychain, or the Secret Service on Linux (GNOME Keyring, KWallet), as the
+ * entry `sync-token` of service `Timer App` (debug builds use `sync-token-dev`), so the token is
+ * not left readable in the webview's storage. Calls reach the store one at a time, in the order
+ * they were made.
+ *
+ * Unsupported on the web (the session cookie needs no store), and in the desktop app once the
+ * store failed: none on a Linux desktop without a Secret Service, a locked store the user did not
+ * unlock, a refused entry. The failure logs the one warning; the app then keeps the token in its
+ * device store, as before M6 (`src/state/auth.svelte.ts`).
+ */
+export interface TokenStore {
+  /** Whether the OS credential store holds the token here: false on the web, and once it failed. */
+  readonly supported: boolean
+  /**
+   * The stored token, or null when none is stored, the entry is not a valid token, or the store
+   * failed (then `supported` reads false). Never rejects.
+   */
+  get(): Promise<DeviceAuth | null>
+  /** Stores `auth` in place of any stored token; resolves to whether it was stored. Never rejects. */
+  set(auth: DeviceAuth): Promise<boolean>
+  /** Removes the stored token; resolves to whether the store holds none now. Never rejects. */
+  clear(): Promise<boolean>
 }

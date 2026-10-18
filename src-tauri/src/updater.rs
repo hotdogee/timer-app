@@ -1,11 +1,12 @@
 //! Whether this build can update itself. The updater plugin is always registered, but a build
-//! whose `tauri.conf.json` still has the placeholder public key (every build until M6 signs the
-//! releases) cannot verify an update, so the webview does not offer one.
+//! whose `tauri.conf.json` still has the placeholder public key (every build until the owner adds
+//! the updater key, docs/release.md › Updater key) cannot verify an update, so the webview does
+//! not offer one.
 
 use serde_json::Value;
 use tauri::{AppHandle, Runtime};
 
-/// The public key `tauri.conf.json` carries until release builds get the real one (M6).
+/// The public key `tauri.conf.json` carries until the owner adds the real one.
 pub const PUBKEY_PLACEHOLDER: &str = "UPDATER_PUBKEY_PLACEHOLDER";
 
 /// Whether the updater plugin's configuration (`plugins.updater` in `tauri.conf.json`) can find
@@ -80,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn this_repository_config_is_not_configured_until_m6() {
+    fn this_repository_config_has_no_updater_key_yet() {
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json"))
             .expect("tauri.conf.json is valid JSON");
         let updater = config.pointer("/plugins/updater");

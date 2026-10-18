@@ -18,19 +18,26 @@
  * 4. A global hotkey recorded in Settings › Desktop starts and pauses the last-used card while
  *    another app has the focus, which keeps it.
  * 5. Desktop sign-in (unless `--skip-sign-in`): the device code shown in Settings › Account is
- *    approved over HTTP by a signed-in user, the app stores the bearer token, the sync socket
- *    connects with it and a card made on the desktop reaches the server; Sign out clears it.
+ *    approved over HTTP by a signed-in user, the app keeps the bearer token in the OS credential
+ *    store (the Windows Credential Manager) and nowhere else, the sync socket connects with it and
+ *    a card made on the desktop reaches the server. Then the token is put back where M5 kept it
+ *    (the device store, none in the OS store) and the page reloaded: the token moves into the OS
+ *    store and leaves the device store, signed in throughout, and the next reload moves nothing.
  * 6. The main window is moved to a known place and closed with nothing running: the app quits
  *    and saves its window state.
  *
  * Run 2 (`tauri dev -- -- --minimized`, as the OS starts it at login):
- * 7. The app starts hidden to the tray; an alarm in the never-shown window still sounds.
+ * 7. The app starts hidden to the tray; the token stored in run 1 signs it in and syncs (unless
+ *    `--skip-sign-in`), and Sign out removes it from the OS store; an alarm in the never-shown
+ *    window still sounds.
  * 8. A second instance exits at once and brings the first one's window back, at the place saved
  *    in run 1.
  *
  * The sync server for step 5 is `e2e/sync-server.ts` (wrangler dev on 8787, fresh local state).
  * The app's web storage lives in a fresh WebView2 data folder under the output folder, so the
- * developer's own cards and settings are untouched; the window state file
+ * developer's own cards and settings are untouched; its sign-in token goes to a credential of its
+ * own (`TIMER_APP_TOKEN_ACCOUNT`, read by debug builds only), removed at the start and the end, so
+ * a developer's own debug sign-in is untouched too; the window state file
  * (`%APPDATA%\com.timerapp.dev\.window-state.json`) is backed up and put back afterwards.
  *
  * Output (`--out`, default `test-results/smoke-desktop`): `report.md`, `report.json`, the
@@ -68,6 +75,12 @@ const WEBVIEW_DEFAULT_ARGS = '--disable-features=msWebOOUI,msPdfOOUI,msSmartScre
 const SAVED_RECT = { x: 160, y: 120, w: 1040, h: 720 }
 /** The global hotkey recorded in Settings › Desktop, and its virtual keys for the OS. */
 const HOTKEY = { text: 'Mod+Alt+Shift+F9', label: 'Ctrl+Alt+Shift+F9', vks: '11,12,10,78' }
+/**
+ * The OS credential store account the debug build keeps the sign-in token under in this run
+ * (`TIMER_APP_TOKEN_ACCOUNT`), and its Windows Credential Manager entry: `<account>.<service>`.
+ */
+const TOKEN_ACCOUNT = 'sync-token-smoke'
+const TOKEN_TARGET = `${TOKEN_ACCOUNT}.Timer App`
 
 const { values: options } = parseArgs({
   options: {
@@ -317,12 +330,36 @@ function startTauri(appArgs, logName) {
   return { pid: child.pid, exited }
 }
 
+/** The app's environment: the smoke's WebView2 settings and its own token credential. */
 function webviewEnv() {
   return {
     ...process.env,
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${String(CDP_PORT)} ${WEBVIEW_DEFAULT_ARGS}`,
     WEBVIEW2_USER_DATA_FOLDER: WEBVIEW_DATA,
+    TIMER_APP_TOKEN_ACCOUNT: TOKEN_ACCOUNT,
   }
+}
+
+/** Runs `cmdkey /<action>:"<the run's token credential>"` (the quotes keep the space). */
+function cmdkey(action) {
+  return spawnSync('cmdkey', [`/${action}:"${TOKEN_TARGET}"`], {
+    encoding: 'utf8',
+    windowsHide: true,
+    windowsVerbatimArguments: true,
+  })
+}
+
+/**
+ * Whether the Windows Credential Manager holds the run's token credential: `cmdkey /list:<name>`
+ * names it in its heading, and once more below it when it exists (in any display language).
+ */
+function tokenCredentialExists() {
+  const lines = cmdkey('list').stdout.split(/\r?\n/)
+  return lines.filter((line) => line.includes(TOKEN_TARGET)).length > 1
+}
+
+function deleteTokenCredential() {
+  cmdkey('delete')
 }
 
 /** Starts the sync server as the end-to-end tests do, for the desktop sign-in. */
@@ -844,6 +881,36 @@ async function cardPhases(page) {
   )
 }
 
+/** In the page: where the sign-in token is (the OS store, the request header, the device store). */
+const TOKEN_STATE = `
+  const os = await app.platform.tokens.get()
+  const saved = localStorage.getItem('timer-app-device') ?? ''
+  return {
+    status: app.authStore.status,
+    supported: app.platform.tokens.supported,
+    os: os && { token: os.token, expiresIn: os.expiresAt - Date.now() },
+    bearer: app.bearerToken(),
+    device: app.settingsStore.auth !== null || saved.includes('authToken'),
+  }`
+
+/**
+ * Checks that the page's token is in the OS credential store and nowhere else (the Credential
+ * Manager has the entry, the device store has none) and is the one the app sends; resolves to it.
+ */
+async function tokenInOsStoreOnly(page) {
+  const state = await page.eval(TOKEN_STATE)
+  assert(state.supported, 'the OS credential store is off (see the page warnings)')
+  assert(state.os !== null, 'no token in the OS credential store')
+  assert(state.os.expiresIn > 0, 'the stored token has expired')
+  assert(state.bearer === state.os.token, 'the app sends another token than the stored one')
+  assert(!state.device, 'the token is in the device store too')
+  assert(tokenCredentialExists(), `the Credential Manager has no ${TOKEN_TARGET}`)
+  return state.os
+}
+
+/** The token run 1 signed in with, which run 2 must still have (never printed). */
+let signedIn = null
+
 async function run1(watcher) {
   run = 1
   log('run 1: starting tauri dev (the first build can take minutes)')
@@ -1110,7 +1177,7 @@ async function run1(watcher) {
 
   // ── Desktop sign-in ─────────────────────────────────────────────────────────────────────
   if (!options['skip-sign-in']) {
-    await check('desktop sign-in: device code, bearer token, sync, sign-out', async () => {
+    await check('desktop sign-in: device code, bearer token in the OS store, sync', async () => {
       await main.eval(
         `if (app.authStore.status === 'signed-in') throw new Error('signed in already')`,
       )
@@ -1166,11 +1233,10 @@ async function run1(watcher) {
         'the app signs in with the approved code',
         { timeout: 30_000 },
       )
-      const token = await main.eval(
-        'const a = app.settingsStore.auth; return a && { length: a.token.length, expiresIn: a.expiresAt - Date.now() }',
+      const token = await poll(
+        () => tokenInOsStoreOnly(main),
+        'the token is kept in the OS credential store only',
       )
-      assert(token !== null && token.length > 0, 'no bearer token in the device store')
-      assert(token.expiresIn > 0, 'the stored token has expired')
       await poll(
         () => main.eval(`return app.remoteSync.status === 'online'`),
         'the sync socket connects with the bearer token',
@@ -1190,19 +1256,54 @@ async function run1(watcher) {
       )
       await sleep(300)
       await screenshot('07-signed-in', mainHwnd)
-      await main.eval(`
-        const out = [...document.querySelectorAll('dialog[open] button')].find((b) => b.textContent.trim() === 'Sign out')
-        if (!out) throw new Error('no Sign out button')
-        out.click()`)
-      await poll(
-        () =>
-          main.eval(
-            `return app.authStore.status === 'signed-out' && app.settingsStore.auth === null`,
-          ),
-        'Sign out clears the stored token',
-      )
       await main.key('Escape')
-      return `code ${code} approved by ${email} (the opener may open ${verificationUrl}); token stored (${String(token.length)} chars, ${String(Math.round(token.expiresIn / 86_400_000))} days); socket online; "${name}" reached the server; signed out`
+      signedIn = token
+      return `code ${code} approved by ${email} (the opener may open ${verificationUrl}); token in the Credential Manager as ${TOKEN_TARGET} only (${String(token.token.length)} chars, ${String(Math.round(token.expiresIn / 86_400_000))} days); socket online; "${name}" reached the server`
+    })
+
+    await check('a token M5 kept in the device store moves to the OS store once', async () => {
+      assert(signedIn !== null, 'not signed in (see the sign-in check)')
+      const problemsBefore = pageProblems.length
+      // As an M5 build left it: the token in the device store, none in the OS store.
+      await main.eval(`
+        app.settingsStore.setAuth(await app.platform.tokens.get())
+        await app.platform.tokens.clear()`)
+      await poll(
+        () => main.eval(`return localStorage.getItem('timer-app-device')?.includes('authToken')`),
+        'the device store saves the token',
+      )
+      assert(!tokenCredentialExists(), `the Credential Manager still has ${TOKEN_TARGET}`)
+      /** Reloads the page; resolves to the OS store writes once it runs signed in and syncing. */
+      const reload = async () => {
+        await main.eval('window.__smokeOldPage = true')
+        const since = Date.now()
+        await main.send('Page.reload')
+        await poll(
+          () =>
+            main.eval(
+              `return !window.__smokeOldPage && app.authStore.status === 'signed-in' && app.remoteSync.status === 'online'`,
+            ),
+          'the reloaded app signs in and syncs',
+          { timeout: 30_000 },
+        )
+        const token = await poll(
+          () => tokenInOsStoreOnly(main),
+          'the token is in the OS credential store only',
+        )
+        assert(token.token === signedIn.token, 'the app has another token than the one moved')
+        return watcher.calls('token_set', since).length
+      }
+      const moves = await reload()
+      assert(moves === 1, `the first start wrote the OS store ${String(moves)} times, not once`)
+      const again = await reload()
+      assert(again === 0, `the next start wrote the OS store ${String(again)} times, not never`)
+      // Tauri answers the old page's pending listeners after a reload, and says so; expected here.
+      for (let i = problemsBefore; i < pageProblems.length; i++) {
+        if (pageProblems[i].includes("[TAURI] Couldn't find callback id")) {
+          pageProblems[i] += ' (expected: this check reloaded the page)'
+        }
+      }
+      return `the reload moved the token into ${TOKEN_TARGET} (one token_set) and emptied the device store, signed in and syncing; the next reload wrote nothing`
     })
   }
 
@@ -1339,6 +1440,58 @@ async function run2(watcher) {
   await watcher.attach()
   const main = await Page.open(isMain, 'main')
 
+  if (!options['skip-sign-in']) {
+    await check('the stored token survives the restart, and Sign out removes it', async () => {
+      assert(signedIn !== null, 'run 1 did not sign in (see its sign-in check)')
+      await poll(
+        () =>
+          main.eval(
+            `return app.authStore.status === 'signed-in' && app.remoteSync.status === 'online'`,
+          ),
+        'the restarted app signs in and syncs with the stored token',
+        { timeout: 30_000 },
+      )
+      const token = await tokenInOsStoreOnly(main)
+      assert(token.token === signedIn.token, 'the stored token changed across the restart')
+      // Settings › Account › Sign out, clicked in the page (the window stays hidden).
+      await main.eval(`
+        const wait = async (find, what) => {
+          for (let i = 0; i < 50; i++) {
+            const found = find()
+            if (found) return found
+            await new Promise((r) => setTimeout(r, 100))
+          }
+          throw new Error('no ' + what)
+        }
+        document.querySelector('button[aria-label="Settings"]').click()
+        ;(await wait(() => document.querySelector('[role=tab][id$="-tab-account"]'), 'Account tab')).click()
+        const buttons = () => [...document.querySelectorAll('dialog[open] button')]
+        ;(await wait(() => buttons().find((b) => b.textContent.trim() === 'Sign out'), 'Sign out button')).click()`)
+      await poll(async () => {
+        const state = await main.eval(TOKEN_STATE)
+        const credential = tokenCredentialExists()
+        const gone =
+          state.status === 'signed-out' &&
+          state.os === null &&
+          state.bearer === null &&
+          !state.device &&
+          !credential
+        // What is left, for the timeout's message (never the token itself).
+        if (!gone) {
+          throw new Error(
+            `status ${String(state.status)}, OS store ${state.os ? 'has a token' : 'empty'}, ` +
+              `request header ${state.bearer ? 'has a token' : 'empty'}, device store ` +
+              `${state.device ? 'has a token' : 'empty'}, Credential Manager ` +
+              `${credential ? `has ${TOKEN_TARGET}` : 'empty'}`,
+          )
+        }
+        return true
+      }, 'Sign out removes the token from the OS store and the app')
+      await main.eval(`document.querySelector('dialog[open]')?.close()`)
+      return `signed in and syncing after the restart with the token from ${TOKEN_TARGET}; Sign out removed it (the Credential Manager has no ${TOKEN_TARGET}; the device store has none)`
+    })
+  }
+
   await check('an alarm sounds in the never-shown window', async () => {
     const result = await main.eval(`
       window.__smokeAudio = []
@@ -1430,6 +1583,8 @@ async function main() {
   const backup = path.join(OUT, 'window-state.backup.json')
   const hadState = existsSync(WINDOW_STATE)
   if (hadState) copyFileSync(WINDOW_STATE, backup)
+  // A token an interrupted run left behind.
+  deleteTokenCredential()
 
   /** Stops everything the run started and puts the window-state file back; once. */
   let cleanedUp = false
@@ -1441,6 +1596,7 @@ async function main() {
     for (const pid of appProcesses()) killTree(pid)
     if (hadState) copyFileSync(backup, WINDOW_STATE)
     else rmSync(WINDOW_STATE, { force: true })
+    deleteTokenCredential()
   }
   // Ctrl+C or a kill: the same cleanup as the end of a run, which `finally` would not reach.
   const stop = () => {

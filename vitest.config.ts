@@ -36,6 +36,16 @@ export default mergeConfig(
             include: ['src/**/*.client.test.ts', 'src/**/*.client.test.svelte.ts'],
           },
         },
+        {
+          // The repository's Node scripts (release, packaging), tested as plain ES modules in
+          // Node: `scripts/*.test.mjs`, next to the script.
+          extends: true,
+          test: {
+            name: 'scripts',
+            environment: 'node',
+            include: ['scripts/**/*.test.mjs'],
+          },
+        },
       ],
     },
   }),

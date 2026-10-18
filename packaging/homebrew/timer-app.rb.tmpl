@@ -1,0 +1,28 @@
+{{notice}}
+cask {{token}} do
+  arch arm: {{arch_arm}}, intel: {{arch_intel}}
+
+  version {{version}}
+  sha256 arm:   {{sha256_arm}},
+         intel: {{sha256_intel}}
+
+  url {{url}}
+  name {{name}}
+  desc {{desc}}
+  homepage {{homepage}}
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  {{auto_updates}}
+  {{depends_on}}
+
+  app {{app}}
+
+  zap trash: [
+    {{zap_trash}}
+  ]
+  {{caveats}}
+end

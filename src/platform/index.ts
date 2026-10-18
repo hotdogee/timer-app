@@ -9,9 +9,9 @@
  * services (see `types.ts`) are unsupported no-ops on the web, except the mini window, which is
  * a Document Picture-in-Picture window where the browser has one (`web/mini-window.ts`).
  * {@link createPlatform} picks the Tauri implementations for the Tauri webview
- * (`tauri/services.ts`); they load their shell code through dynamic `import()` on first use. Only
- * desktop builds contain them at all: `__DESKTOP__` (vite.config.ts) is false in a web build, so
- * the bundler leaves `tauri/services.ts` out of it. Importing this module has no side effects beyond creating
+ * (`tauri/services.ts`, and `tauri/token-store.ts` for the sign-in token); they load their shell
+ * code through dynamic `import()` on first use. Only desktop builds contain them at all:
+ * `__DESKTOP__` (vite.config.ts) is false in a web build, so the bundler leaves them out of it. Importing this module has no side effects beyond creating
  * plain objects: audio contexts, the wake worker and DOM listeners are created on first use, so
  * it also loads under Node (tests).
  */
@@ -21,12 +21,14 @@ import { createWebFullscreen, type FullscreenController } from './fullscreen'
 import { createIdSource, type IdSource } from './ids'
 import { createWebNotifier, type Notifier } from './notifications'
 import { createTauriServices, type DesktopShell } from './tauri/services'
+import { createTauriTokenStore } from './tauri/token-store'
 import type {
   ActivityReporter,
   Autostart,
   GlobalHotkeys,
   MiniWindowController,
   Opener,
+  TokenStore,
   Updater,
 } from './types'
 import { createWebWakeScheduler, type WakeScheduler } from './wake'
@@ -57,6 +59,7 @@ export {
   type ActivityReporter,
   type Autostart,
   type CloseBehavior,
+  type DeviceAuth,
   type GlobalHotkeys,
   type HotkeyId,
   type HotkeyResult,
@@ -64,6 +67,7 @@ export {
   type MiniWindowOptions,
   type MiniWindowRender,
   type Opener,
+  type TokenStore,
   type UpdateCheck,
   type UpdateInfo,
   type Updater,
@@ -101,6 +105,8 @@ export interface Platform {
   readonly activity: ActivityReporter
   /** Opens URLs in the system browser. */
   readonly opener: Opener
+  /** The sign-in token in the OS credential store (desktop only). */
+  readonly tokens: TokenStore
   /** The tray menu's labels, the mini window page's card switches, the smoke hook (desktop only). */
   readonly shell: DesktopShell
 }
@@ -154,6 +160,14 @@ export const webActivity: ActivityReporter = Object.freeze({
   onToggleLast: () => noop,
 })
 
+/** The token store on the web: unsupported (the session cookie needs none); nothing is stored. */
+export const unsupportedTokenStore: TokenStore = Object.freeze({
+  supported: false,
+  get: () => Promise.resolve(null),
+  set: () => Promise.resolve(false),
+  clear: () => Promise.resolve(false),
+})
+
 /** The desktop shell's hooks on the web: there is no tray, no mini window page, no smoke test. */
 export const webShell: DesktopShell = Object.freeze({
   supported: false,
@@ -205,7 +219,9 @@ export function createPlatform(kind: PlatformKind = detectKind()): Platform {
     ids: createIdSource(),
     fullscreen: createWebFullscreen(),
   }
-  if (__DESKTOP__ && kind === 'tauri') return { kind, ...shared, ...createTauriServices() }
+  if (__DESKTOP__ && kind === 'tauri') {
+    return { kind, ...shared, ...createTauriServices(), tokens: createTauriTokenStore() }
+  }
   return {
     kind,
     ...shared,
@@ -217,6 +233,7 @@ export function createPlatform(kind: PlatformKind = detectKind()): Platform {
     updater: unsupportedUpdater,
     activity: webActivity,
     opener: createWebOpener(),
+    tokens: unsupportedTokenStore,
     shell: webShell,
   }
 }
