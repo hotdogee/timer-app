@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { Agent } from 'node:http'
+import path from 'node:path'
 
 import { paraglideVitePlugin } from '@inlang/paraglide-js'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
@@ -6,6 +8,7 @@ import { defineConfig, type Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 import pkg from './package.json' with { type: 'json' }
+import { privacyPageHtml } from './scripts/privacy-page.mjs'
 
 /** Set by `tauri dev` when targeting a physical mobile device; the dev server must listen on it. */
 const tauriDevHost = process.env.TAURI_DEV_HOST
@@ -145,11 +148,65 @@ function tauriStaysLazy(): Plugin {
   }
 }
 
+/** The privacy policy page's file in `dist/`, which the site serves at `/privacy`. */
+const PRIVACY_PAGE_FILE = 'privacy.html'
+
+/**
+ * The privacy policy as a page of its own, `/privacy` (spec › Sync › Obligations):
+ * `docs/privacy.md`, the source of truth, rendered by scripts/privacy-page.mjs, which fails on
+ * Markdown it does not know (a placeholder such as `[Operator name]` included). A build writes it
+ * to `dist/privacy.html`: Workers static assets serve that at `/privacy` (their default
+ * `html_handling`), before the single-page-application fallback, and the service worker
+ * precaches it and answers `/privacy` from that entry (never its navigation fallback, the app
+ * shell: see `navigateFallbackDenylist`). `vite preview` serves it at `/privacy` by itself. The
+ * dev server answers `/privacy` (and `/privacy.html`) here, rendering the file on every request,
+ * so an edit shows on reload.
+ */
+function privacyPage(): Plugin {
+  let source = ''
+  const render = (): string => privacyPageHtml(readFileSync(source, 'utf8'))
+  return {
+    name: 'timer-app:privacy-page',
+    configResolved(config) {
+      source = path.resolve(config.root, 'docs', 'privacy.md')
+    },
+    buildStart() {
+      this.addWatchFile(source)
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: PRIVACY_PAGE_FILE, source: render() })
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const { pathname } = new URL(req.url ?? '/', 'http://localhost')
+        if (
+          (req.method !== 'GET' && req.method !== 'HEAD') ||
+          (pathname !== '/privacy' && pathname !== `/${PRIVACY_PAGE_FILE}`)
+        ) {
+          next()
+          return
+        }
+        let html: string
+        try {
+          html = render()
+        } catch (error) {
+          next(error)
+          return
+        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.end(html)
+      })
+    },
+  }
+}
+
 // Tauri-friendly settings follow https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
   plugins: [
     svelte(),
     tauriStaysLazy(),
+    privacyPage(),
     // Keep these options in step with the `i18n:compile` script in package.json.
     ...(vitest
       ? []
@@ -196,8 +253,9 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
         // Navigations to the server (an OAuth callback, a download from /api/export) must reach
-        // the network, not the app shell.
-        navigateFallbackDenylist: [/^\/api\//, /^\/__dev\//],
+        // the network, not the app shell. So must the privacy policy's page whenever the precache
+        // (which answers /privacy first, from privacy.html) has no copy of it.
+        navigateFallbackDenylist: [/^\/api\//, /^\/__dev\//, /^\/privacy(\.html)?$/],
       },
       devOptions: { enabled: false },
     }),

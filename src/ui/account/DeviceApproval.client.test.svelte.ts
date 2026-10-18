@@ -189,6 +189,7 @@ describe('the device page', () => {
     const { target } = await setup({ status: 'signed-out' })
     const link = query<HTMLAnchorElement>(target, '.sign-in a[target="_blank"]')
     expect(link.textContent.trim()).toBe('How your data is handled')
+    expect(link.getAttribute('href')).toBe('/privacy')
     expect(link.rel).toBe('noopener noreferrer')
   })
 

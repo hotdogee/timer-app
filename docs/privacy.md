@@ -1,8 +1,6 @@
 # Privacy policy
 
-**Draft**, last updated 2026-10-18. Not yet in force: before the first public release, fill in the
-operator and contact placeholders (`[…]`), have it reviewed, and publish it on the app's own site.
-Settings › About and Settings › Account link to this file.
+Last updated 2026-10-18. Settings › About and Settings › Account link to this page.
 
 Timer App is a timer and stopwatch. It is built to need as little of your data as possible: you
 can use all of it without an account, and nothing leaves your device unless you sign in to sync.
@@ -26,7 +24,7 @@ same cards. Signing in is optional, and you can sign out or delete the account a
 
 ### What we store
 
-**Your account**
+#### Your account
 
 - Your email address.
 - Your name and profile picture address, if you sign in with Google, GitHub or Apple and that
@@ -36,7 +34,7 @@ same cards. Signing in is optional, and you can sign out or delete the account a
 - Your sessions: one per signed-in device, with when it started and expires, and the IP address
   and browser description (user agent) it signed in from, so the sessions can be checked.
 
-**Your synced data**
+#### Your synced data
 
 - Your cards, including their names, durations, state and timestamps.
 - Your presets.
@@ -44,7 +42,7 @@ same cards. Signing in is optional, and you can sign out or delete the account a
 
 Appearance settings and the language stay on each device and are never uploaded.
 
-**Short-lived records**
+#### Short-lived records
 
 - Sign-in codes: each code encrypted, with the email address it was sent to. A code works for
   10 minutes and is removed once used.
@@ -138,5 +136,4 @@ release notes. The date at the top shows the last change.
 
 ## Contact
 
-[Operator name], [postal address]
-[contact email]
+Han Lin, [hotdogee@gmail.com](mailto:hotdogee@gmail.com)

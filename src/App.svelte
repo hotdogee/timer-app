@@ -33,6 +33,10 @@
   controller. The mini window (the header button, `T`, the palette) opens through the platform:
   a window of its own on desktop, Picture-in-Picture in Chromium. The desktop app's update prompt
   shares the snackbar slot.
+
+  The web app's page is also the site's home page: under the cards it says what the app is and
+  links the privacy policy, as Google's brand verification of the sign-in consent screen asks of a
+  home page. The desktop app leaves that out (Settings › About links the policy there too).
 -->
 <script lang="ts">
   import { tick, untrack } from 'svelte'
@@ -55,6 +59,7 @@
   import { presetStore } from './state/presets.svelte'
   import { settingsStore } from './state/settings.svelte'
   import { remoteSync } from './sync/remote.svelte'
+  import { PRIVACY_POLICY_URL } from './ui/account/privacy'
   import Announcer from './ui/Announcer.svelte'
   import { announce } from './ui/announce.svelte'
   import ConfirmDialog from './ui/ConfirmDialog.svelte'
@@ -591,6 +596,18 @@
       {/if}
     </div>
   </div>
+
+  {#if !__DESKTOP__}
+    <!-- The home page's note on the app and its privacy policy; inert under the overlay too. -->
+    <footer class="about" inert={overlayId !== null}>
+      <p>{m.home_about({ app: m.app_name() })}</p>
+      <p>
+        <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
+          {m.home_privacy()}
+        </a>
+      </p>
+    </footer>
+  {/if}
 </main>
 
 <Announcer />
@@ -645,6 +662,29 @@
 
   .floating {
     display: contents;
+  }
+
+  /* Under the last row, above the action bar's band (the padding above). */
+  .about {
+    max-inline-size: 40rem;
+    margin: var(--space-6, 2rem) auto 0;
+    text-align: center;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--md-sys-color-on-surface-variant);
+  }
+
+  .about p {
+    margin: 0;
+  }
+
+  .about a {
+    display: inline-flex;
+    align-items: center;
+    min-block-size: var(--touch-target, 44px);
+    color: var(--md-sys-color-primary);
+    font-weight: 500;
+    text-underline-offset: 0.15em;
   }
 
   .snackbar-host {

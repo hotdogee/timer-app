@@ -146,7 +146,7 @@ describe('signed out', () => {
     expect(text(target)).toContain('or')
     const privacy = query<HTMLAnchorElement>(target, 'a')
     expect(privacy.textContent.trim()).toBe('How your data is handled')
-    expect(privacy.href).toContain('docs/privacy.md')
+    expect(privacy.getAttribute('href')).toBe('/privacy')
   })
 
   it('shows no provider buttons and no divider when none is configured', async () => {

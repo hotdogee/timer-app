@@ -11,7 +11,8 @@
  * installer) become `Hotdogee.TimerApp*.yaml` in `--out`, a folder `winget validate` and
  * `wingetcreate submit` take as it is. Publisher, name, descriptions, copyright and homepage come
  * from `src-tauri/tauri.conf.json`, the license and moniker from `package.json`, so they match what
- * the installer writes to Add/Remove Programs. Where the installers come from:
+ * the installer writes to Add/Remove Programs. The privacy policy's URL is the production site's
+ * `/privacy` page ({@link privacyPolicyUrl}). Where the installers come from:
  *
  * - `--release`: the NSIS installers (`*-setup.exe`) for x64 and arm64 in the GitHub release
  *   `v<version>`, with the SHA-256 GitHub records for each asset (downloaded and hashed when it has
@@ -48,6 +49,7 @@ import {
   ReleaseError,
   agreedVersion,
   parseVersion,
+  productionOrigin,
   readVersions,
 } from './release.mjs'
 import { assetName } from './check-latest-json.mjs'
@@ -152,6 +154,17 @@ export function readApp(root, version) {
     minimumSystemVersion: bundle.macOS?.minimumSystemVersion ?? null,
     updaterConfigured: pubkey !== '' && pubkey !== PUBKEY_PLACEHOLDER,
   })
+}
+
+/**
+ * The privacy policy's public page, `/privacy` on the production site (the sync server's origin
+ * the desktop app allows, {@link productionOrigin}, which serves the web app too), from the files
+ * under `root`. Throws a {@link ReleaseError} when the configuration names no such origin.
+ */
+export function privacyPolicyUrl(root) {
+  const tauri = JSON.parse(readFileSync(path.join(root, FILES.tauriConfig), 'utf8'))
+  const capability = JSON.parse(readFileSync(path.join(root, FILES.capability), 'utf8'))
+  return `${productionOrigin(tauri, capability)}/privacy`
 }
 
 // ── Templates ───────────────────────────────────────────────────────────────────────────────
@@ -347,11 +360,14 @@ export function archPairs(values, arches, option) {
 
 /**
  * The values the winget templates use, for `app` and `installers` (`{ arch, url, sha256 }`, in
- * manifest order) released on `releaseDate` (`YYYY-MM-DD`). `notice` is the comment the files
- * start with.
+ * manifest order) released on `releaseDate` (`YYYY-MM-DD`), with the privacy policy at
+ * `privacyUrl` ({@link privacyPolicyUrl}). `notice` is the comment the files start with.
  */
-export function wingetValues(app, { installers, releaseDate, notice }) {
+export function wingetValues(app, { installers, releaseDate, notice, privacyUrl }) {
   if (installers.length === 0) throw new ReleaseError('no installer to list')
+  if (!/^https:\/\/\S+$/.test(String(privacyUrl))) {
+    throw new ReleaseError(`bad privacy policy URL ${String(privacyUrl)}`)
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) {
     throw new ReleaseError(`bad release date ${releaseDate}`)
   }
@@ -372,7 +388,7 @@ export function wingetValues(app, { installers, releaseDate, notice }) {
     publisher: yamlScalar(app.publisher),
     publisher_url: yamlScalar(`https://github.com/${app.repo.owner}`),
     support_url: yamlScalar(`${home}/issues`),
-    privacy_url: yamlScalar(`${home}/blob/main/docs/privacy.md`),
+    privacy_url: yamlScalar(privacyUrl),
     package_name: yamlScalar(app.productName),
     package_url: yamlScalar(app.homepage),
     license: yamlScalar(app.license),
@@ -593,6 +609,7 @@ export async function main(argv, context = {}) {
       installers,
       releaseDate: options['release-date'] ?? date ?? today,
       notice: noticeFor(source, app),
+      privacyUrl: privacyPolicyUrl(root),
     })
     const manifests = renderManifests(path.join(root, WINGET_TEMPLATE_DIR), values)
     const dir = path.resolve(ctx.cwd, options.out)

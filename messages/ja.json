@@ -52,6 +52,8 @@
   "empty_hint": "タイマーかストップウォッチを追加しましょう。",
   "empty_new_timer": "新しいタイマー",
   "empty_new_stopwatch": "新しいストップウォッチ",
+  "home_about": "{app} はキーボード操作を中心にしたタイマーとストップウォッチです。ログインすると、カードをデバイス間で同期できます。",
+  "home_privacy": "プライバシーポリシー",
 
   "palette_label": "コマンドパレット",
   "palette_search_label": "コマンドを検索",

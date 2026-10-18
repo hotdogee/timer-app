@@ -52,6 +52,8 @@
   "empty_hint": "新增計時器或碼錶即可開始使用。",
   "empty_new_timer": "新增計時器",
   "empty_new_stopwatch": "新增碼錶",
+  "home_about": "{app} 是以鍵盤操作為主的計時器與碼錶。登入即可在各裝置間同步卡片。",
+  "home_privacy": "隱私權政策",
 
   "palette_label": "命令選擇區",
   "palette_search_label": "搜尋命令",

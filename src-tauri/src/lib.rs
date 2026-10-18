@@ -428,8 +428,12 @@ mod tests {
         assert!(opens("http://localhost:5173/device?user_code=WDJBMJHT"));
         // The API's own origin, when the server names no page (`verificationUrlFor`).
         assert!(opens("http://localhost:8787/device?user_code=WDJBMJHT"));
-        // Production, and the privacy policy and source links in Settings.
+        // Production, and the privacy policy and source links in Settings: the policy's page on
+        // the production site (`${apiOrigin()}/privacy`, src/ui/account/privacy.ts), with or
+        // without a section, and its source on GitHub.
         assert!(opens("https://timer.hanlin.uk/device?user_code=WDJBMJHT"));
+        assert!(opens("https://timer.hanlin.uk/privacy"));
+        assert!(opens("https://timer.hanlin.uk/privacy#logs"));
         assert!(opens(
             "https://github.com/hotdogee/timer-app/blob/main/docs/privacy.md"
         ));
@@ -442,6 +446,7 @@ mod tests {
             "http://localhost:5173/",
             "http://localhost:8787/api/export",
             "http://example.com/device?user_code=WDJBMJHT",
+            "http://timer.hanlin.uk/privacy",
             "file:///C:/Windows/System32/calc.exe",
         ] {
             assert!(!opens(url), "{url}");
@@ -450,13 +455,16 @@ mod tests {
 
     #[test]
     fn the_browser_opens_no_other_https_page() {
-        // Only the production server's device page (a placeholder origin until the final domain,
-        // spec Q13) and the project's GitHub pages.
+        // Only the production server's device page and privacy policy, and the project's GitHub
+        // pages.
         for url in [
             "https://example.com/",
             "https://timer.hanlin.uk/",
             "https://timer.hanlin.uk/api/export",
+            "https://timer.hanlin.uk/index.html?privacy",
             "https://timer.hanlin.uk.evil.example/device?user_code=WDJBMJHT",
+            "https://timer.hanlin.uk.evil.example/privacy",
+            "https://evil.example/?https://timer.hanlin.uk/privacy",
             "https://evil.example/?https://timer.hanlin.uk/device",
             "https://github.com/hotdogee",
             "https://github.com/hotdogee/timer-app-fork",

@@ -25,6 +25,7 @@ import {
   main,
   pickInstaller,
   placeholderSha256,
+  privacyPolicyUrl,
   readApp,
   renderManifests,
   renderTemplate,
@@ -59,8 +60,29 @@ const TAURI = {
     homepage: 'https://github.com/someone/timer-app',
     macOS: { minimumSystemVersion: '11.0' },
   },
+  app: {
+    security: {
+      csp: "default-src 'self'; connect-src 'self' https://timer.example.org wss://timer.example.org",
+    },
+  },
   plugins: { updater: { pubkey: 'UPDATER_PUBKEY_PLACEHOLDER' } },
 }
+
+/** The main window's capability: the browser opener may open the production site's pages. */
+const CAPABILITY = {
+  permissions: [
+    {
+      identifier: 'opener:allow-open-url',
+      allow: [
+        { url: 'https://timer.example.org/device*' },
+        { url: 'https://timer.example.org/privacy*' },
+      ],
+    },
+  ],
+}
+
+/** The privacy policy's page on the fixture's production site. */
+const PRIVACY_URL = 'https://timer.example.org/privacy'
 
 /** A repository with the app's files at version `version` and the real packaging templates. */
 function fixture({ version = '0.3.0', tauri = TAURI } = {}) {
@@ -74,6 +96,7 @@ function fixture({ version = '0.3.0', tauri = TAURI } = {}) {
     `${JSON.stringify({ name: 'timer-app', version, license: 'MIT' }, null, 2)}\n`,
   )
   write('src-tauri/tauri.conf.json', `${JSON.stringify({ ...tauri, version }, null, 2)}\n`)
+  write('src-tauri/capabilities/default.json', `${JSON.stringify(CAPABILITY, null, 2)}\n`)
   write('src-tauri/Cargo.toml', `[package]\nname = "timer-app"\nversion = "${version}"\n`)
   write('src-tauri/Cargo.lock', `[[package]]\nname = "timer-app"\nversion = "${version}"\n`)
   cpSync(path.join(ROOT, 'packaging'), path.join(root, 'packaging'), { recursive: true })
@@ -304,7 +327,12 @@ describe('the manifests', () => {
 
   it('renders the three files from the app and the installers', () => {
     const app = readApp(fixture())
-    const values = wingetValues(app, { installers, releaseDate: '2026-11-02', notice: '# note' })
+    const values = wingetValues(app, {
+      installers,
+      releaseDate: '2026-11-02',
+      notice: '# note',
+      privacyUrl: PRIVACY_URL,
+    })
     const files = renderManifests(path.join(ROOT, WINGET_TEMPLATE_DIR), values)
     expect([...files.keys()]).toEqual([
       'Hotdogee.TimerApp.installer.yaml',
@@ -332,6 +360,7 @@ describe('the manifests', () => {
       /^ReleaseNotesUrl: https:\/\/github\.com\/someone\/timer-app\/releases\/tag\/v0\.3\.0$/m,
     )
     expect(locale).toMatch(/^Moniker: timer-app$/m)
+    expect(locale).toMatch(/^PrivacyUrl: https:\/\/timer\.example\.org\/privacy$/m)
     for (const text of files.values()) {
       expect(text.startsWith('# note\n')).toBe(true)
       expect(text).toMatch(new RegExp(`^PackageIdentifier: ${PACKAGE_IDENTIFIER}$`, 'm'))
@@ -351,13 +380,43 @@ describe('the manifests', () => {
         installers: [{ ...installers[0], ...installer }],
         releaseDate: '2026-11-02',
         notice: '',
+        privacyUrl: PRIVACY_URL,
       })
     expect(bad({ arch: 'x86' })).toThrow(/arch/)
     expect(bad({ url: 'http://example.com/a.exe' })).toThrow(/URL/)
     expect(bad({ sha256: 'abc' })).toThrow(/SHA-256/)
     expect(() =>
-      wingetValues(app, { installers: [], releaseDate: '2026-11-02', notice: '' }),
+      wingetValues(app, {
+        installers: [],
+        releaseDate: '2026-11-02',
+        notice: '',
+        privacyUrl: PRIVACY_URL,
+      }),
     ).toThrow()
+    for (const privacyUrl of [undefined, 'http://timer.example.org/privacy', '/privacy']) {
+      expect(
+        () => wingetValues(app, { installers, releaseDate: '2026-11-02', notice: '', privacyUrl }),
+        String(privacyUrl),
+      ).toThrow(/privacy policy URL/)
+    }
+  })
+
+  it("links the privacy policy's page on the production site the app allows", () => {
+    expect(privacyPolicyUrl(fixture())).toBe(PRIVACY_URL)
+    // Not where the browser opener may not open it (release.mjs › productionOrigin).
+    const root = fixture()
+    writeFileSync(
+      path.join(root, 'src-tauri/capabilities/default.json'),
+      JSON.stringify({
+        permissions: [
+          {
+            identifier: 'opener:allow-open-url',
+            allow: [{ url: 'https://timer.example.org/device*' }],
+          },
+        ],
+      }),
+    )
+    expect(() => privacyPolicyUrl(root)).toThrow(/privacy\* \(the privacy policy\)/)
   })
 })
 
@@ -376,6 +435,7 @@ describe('the CLI', () => {
     expect(installer).toContain(placeholderSha256(1).toUpperCase())
     expect(installer).toContain(placeholderSha256(2).toUpperCase())
     expect(installer).toMatch(/^ReleaseDate: 2026-10-18$/m)
+    expect(files['Hotdogee.TimerApp.locale.en-US.yaml']).toContain(`PrivacyUrl: ${PRIVACY_URL}\n`)
   })
 
   it('--release lists the release’s installers with their checksums and date', async () => {
@@ -538,6 +598,9 @@ describe('this repository', () => {
     expect(locale).toMatch(new RegExp(`^Publisher: ${tauri.bundle.publisher}$`, 'm'))
     expect(locale).toMatch(new RegExp(`^PackageName: ${tauri.productName}$`, 'm'))
     expect(locale).toMatch(/^License: MIT$/m)
+    // The policy's public page, which the store listings and the Google consent screen give.
+    expect(privacyPolicyUrl(ROOT)).toMatch(/^https:\/\/[^/]+\/privacy$/)
+    expect(locale).toContain(`\nPrivacyUrl: ${privacyPolicyUrl(ROOT)}\n`)
     expect(files['Hotdogee.TimerApp.yaml']).toMatch(
       new RegExp(`^PackageVersion: ${app.version.replaceAll('.', '\\.')}$`, 'm'),
     )

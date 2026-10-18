@@ -312,7 +312,13 @@ describe('the CLI', () => {
     "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://sync.example.org wss://sync.example.org"
 
   /** A repository with the versioned files at `versions` (one value, or one per file). */
-  function fixture({ version = '0.3.0', lockVersion = version, changelog, pubkey } = {}) {
+  function fixture({
+    version = '0.3.0',
+    lockVersion = version,
+    changelog,
+    pubkey,
+    opener = ['https://sync.example.org/device*', 'https://sync.example.org/privacy*'],
+  } = {}) {
     const root = mkdtempSync(path.join(tmpdir(), 'release-test-'))
     roots.push(root)
     mkdirSync(path.join(root, 'src-tauri', 'capabilities'), { recursive: true })
@@ -325,7 +331,7 @@ describe('the CLI', () => {
         permissions: [
           {
             identifier: 'opener:allow-open-url',
-            allow: [{ url: 'https://sync.example.org/device*' }],
+            allow: opener.map((url) => ({ url })),
           },
         ],
       }),
@@ -491,6 +497,25 @@ describe('the CLI', () => {
     })
     for (const bad of ['http://sync.example.org', 'https://sync.example.org/api', 'nope']) {
       expect(run(['--check', '--origin', bad], root), bad).toMatchObject({ code: 2 })
+    }
+  })
+
+  it('--check --origin fails unless the browser opener may open its sign-in page and policy', () => {
+    const check = (opener) =>
+      run(['--check', '--origin', 'https://sync.example.org'], fixture({ opener }).root)
+    expect(check(['https://sync.example.org/privacy*'])).toMatchObject({
+      code: 1,
+      err: expect.stringContaining('https://sync.example.org/device* (the sign-in page)'),
+    })
+    // The desktop app's links to the privacy policy (Settings › About and Account).
+    for (const opener of [
+      ['https://sync.example.org/device*'],
+      ['https://sync.example.org/device*', 'https://old.example.org/privacy*'],
+    ]) {
+      expect(check(opener), opener.join(' ')).toMatchObject({
+        code: 1,
+        err: expect.stringContaining('https://sync.example.org/privacy* (the privacy policy)'),
+      })
     }
   })
 

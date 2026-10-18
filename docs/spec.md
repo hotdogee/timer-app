@@ -148,7 +148,7 @@ v1 syncs cards and their live state across devices.
 - **Desktop sign-in**: Google blocks OAuth inside embedded webviews, so the desktop app signs in with device authorization: it shows a short code, the user approves it on the `/device` page in the system browser, and the app receives a bearer token (no deep link). The emailed code works on desktop too.
 - **Obligations**: privacy policy, account deletion, data export.
 - **Accounts are optional.** The app works fully signed out; signing in turns on sync and uploads the local cards.
-- **Sign-in**: email code, Google, Apple, GitHub.
+- **Sign-in**: email code, Google and GitHub (live); Apple once there is an Apple Developer Program membership.
 - **Ringing**: every device with the app open rings; dismissing on any device stops them all. A device that was closed when a timer ended catches up without undoing a dismiss, pause or reset made elsewhere.
 - **Backend**: our own sync server on Cloudflare Workers; see [tech-stack.md › Server](tech-stack.md#server).
 
@@ -197,7 +197,6 @@ Settings open from the ⚙ button in the action bar, `Mod+,` or the command pale
 
 - **(Q22)** App icon. A placeholder ships (blue rounded square with a white ring and dot) until a real icon is designed; it is used for the PWA, the favicon and, in M6, the desktop installers.
 
-- **(Q23)** Privacy policy. `docs/privacy.md` is a draft with operator and contact placeholders; fill them in, have it reviewed and publish it before the first public release.
 
 - **(Q24)** Release prerequisites only the owner can settle, listed in [release.md › QA checklist](release.md#qa-checklist-for-the-owner): the Windows signing route, the Apple Developer Program, the updater key, the winget and Homebrew accounts, the Microsoft Store listing, the Cloudflare account, the first version number, and the `release` environment and rulesets on GitHub.
 
@@ -254,3 +253,5 @@ New questions continue from Q25.
 | 2026-10-18 | — | Release pipeline (M6): `pnpm release <patch\|minor\|major\|x.y.z>` bumps the one version in package.json, tauri.conf.json, Cargo.toml and Cargo.lock, writes the CHANGELOG section and, with `--commit`, tags `vX.Y.Z`; versions are plain x.y.z within the MSI limits. A pushed `v*` tag runs `release.yml`: verify (the CI checks plus version, origin and updater-key checks) → draft release → six desktop legs (Windows x64 and Arm64, macOS Apple Silicon and Intel, Linux x64 and Arm64) → publish writes `latest.json` with download URLs and un-drafts → winget, Homebrew tap and the web deploy. Signing activates only when secrets exist (all five `AZURE_*` for Windows, `APPLE_*` for macOS, else ad-hoc; Linux ships unsigned); dry runs upload workflow artifacts and never publish. Runners are pinned images, actions are SHA-pinned with Dependabot, secrets live in the `release` environment. |
 | 2026-10-18 | — | Desktop hardening (M6): a real content security policy (self, the IPC origin, the sync origin, the two avatar hosts); `tauri dev` does not apply it, so it is verified against a local-server build. The opener scope is the device page and the sync origin only. Installers show the MIT license page; NSIS follows the OS language. `requireSignedVersion` is recommended on once the updater key exists. |
 | 2026-10-18 | Q13 | Final identifiers: the name stays "Timer App" (`timer-app`), the bundle identifier is `uk.hanlin.timer`, the publisher "Han Lin", the sync server `https://timer.hanlin.uk` (a subdomain of the owner's `hanlin.uk`, also Resend's sending domain), the MSI upgrade code is pinned. None of these change after the first public release. Windows builds ship unsigned and macOS builds ad-hoc signed for now; the updater key exists. |
+| 2026-10-18 | Q23 | Privacy policy final: operator Han Lin, contact hotdogee@gmail.com. Published at `https://timer.hanlin.uk/privacy`, rendered at build time from `docs/privacy.md` by a strict converter that fails the build on placeholders or unknown syntax; linked from the web home page's footer, Settings › About, Account and the device page, and used as the winget and Store listing URL. |
+| 2026-10-18 | Q16 | Apple sign-in deferred: it needs the Apple Developer Program, which the owner is not paying for now. Email codes (Resend), Google and GitHub are live in production; the Apple code path stays and turns on when its secrets exist. |

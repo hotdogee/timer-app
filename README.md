@@ -11,7 +11,7 @@ sync across devices through our own server, a Cloudflare Worker in `server/`.
 - Stack and architecture: [docs/tech-stack.md](docs/tech-stack.md)
 - The sync server: [server/README.md](server/README.md); deploying it: [docs/deploy.md](docs/deploy.md)
 - Releasing: [docs/release.md](docs/release.md); what changed: [CHANGELOG.md](CHANGELOG.md)
-- Privacy policy (draft): [docs/privacy.md](docs/privacy.md)
+- Privacy policy: <https://timer.hanlin.uk/privacy>, built from [docs/privacy.md](docs/privacy.md)
 
 ## Install
 
@@ -59,7 +59,7 @@ see [Sync server](#sync-server). The desktop app is described in [Desktop](#desk
 | Command               | What it does                                                                                      |
 | --------------------- | ------------------------------------------------------------------------------------------------- |
 | `pnpm dev`            | Vite dev server with hot reload; forwards `/api` and `/__dev` to the sync server on port 8787     |
-| `pnpm build`          | Production web build into `dist/`, with the service worker and the web app manifest               |
+| `pnpm build`          | Production web build into `dist/`, with the service worker, the manifest and `privacy.html`       |
 | `pnpm preview`        | Serve the production build locally (Vite; forwards the API like `pnpm dev`)                       |
 | `pnpm check`          | Compile the messages, then type-check everything: `svelte-check`, `tsc`, `wrangler types --check` |
 | `pnpm lint`           | ESLint (type-aware, the server included) and Prettier check                                       |
@@ -79,6 +79,14 @@ see [Sync server](#sync-server). The desktop app is described in [Desktop](#desk
 | `pnpm server:migrate` | Apply `server/migrations/` to the local D1 (`server:migrate:remote` for production)               |
 | `pnpm server:types`   | Regenerate `server/worker-configuration.d.ts` after changing `server/wrangler.jsonc`              |
 | `pnpm server:deploy`  | `wrangler deploy` (see [docs/deploy.md](docs/deploy.md))                                          |
+
+`pnpm build` also renders the privacy policy, `docs/privacy.md`, into the standalone page
+`dist/privacy.html` (the `privacyPage` plugin in `vite.config.ts`, with
+`scripts/privacy-page.mjs`), which the site serves at `/privacy`; `pnpm dev` serves it there too,
+rendered on every request. The renderer knows only the Markdown the policy uses (headings,
+paragraphs, `- ` lists, bold, code and links to a heading, a path of the site, `https://` or
+`mailto:`) and fails the build on anything else, a leftover placeholder such as `[Operator name]`
+included.
 
 Unit tests run in three Vitest projects: `unit` (Node; `*.test.ts`), `client` (jsdom with
 Svelte's browser runtime, where effects run; `*.client.test.ts`, or `*.client.test.svelte.ts` when
@@ -163,10 +171,11 @@ src-tauri/        Tauri 2 desktop shell (Rust): plugins, tray, close behavior, m
                   color, the OS credential store, the smoke hook; capabilities/ says what each
                   window may call; tauri.*.json are the config overlays for release builds
 scripts/          The release command (release.mjs), the release workflow's helpers (release
-                  notes, the latest.json check, the winget manifests, the Homebrew cask) and the
-                  desktop smoke test (smoke-desktop.mjs)
+                  notes, the latest.json check, the winget manifests, the Homebrew cask), the
+                  desktop smoke test (smoke-desktop.mjs) and the privacy policy page's renderer
+                  (privacy-page.mjs, which the build runs)
 packaging/        Templates of the winget manifests and the Homebrew cask
-docs/             Product spec, tech stack, deployment and release guides, privacy policy draft
+docs/             Product spec, tech stack, deployment and release guides, privacy policy
 .github/          CI, release and deploy workflows; issue and pull request templates
 ```
 
@@ -244,6 +253,14 @@ buttons are hidden).
   token, keeps it in the OS credential store (never synced, never exported) and sends it with
   every API request and as the sync socket's subprotocol. The emailed code works on desktop too;
   the provider buttons are hidden there. See [Desktop](#desktop).
+- **Privacy policy**: public at <https://timer.hanlin.uk/privacy>, the address the Google sign-in
+  consent screen and the store listings give. Settings › About, Settings › Account and the
+  `/device` page link it (`src/ui/account/privacy.ts`): on the web as `/privacy` of the same
+  origin, in the desktop app as the API origin's `/privacy`, opened in the system browser. On the
+  web the home page links it too, in a line under the cards that also says what the app is
+  (`App.svelte`): Google's brand verification of the consent screen looks for both there. The
+  build renders it from `docs/privacy.md` (see [Scripts](#scripts)); the service worker precaches
+  it, so it opens offline too, and never answers `/privacy` with the app shell.
 
 ## Sync server
 
@@ -388,9 +405,11 @@ policy applied) can sign in and sync against `pnpm server:dev`.
   declares them as permissions, `allow-<command>`, so a command no capability grants is refused).
   The mini window may only listen to events, drag itself, read the accent color and close and pin
   itself. The browser opener may open only the sign-in approval page (`/device` on the production
-  sync server, and locally `http://localhost:5173/device*` and `http://localhost:8787/device*`)
-  and the project's pages on GitHub (`https://github.com/hotdogee/timer-app` and below, for
-  Settings › About and the privacy policy). The debug-only `smoke_mark` command and its
+  sync server, and locally `http://localhost:5173/device*` and `http://localhost:8787/device*`),
+  the privacy policy on the production site (`https://timer.hanlin.uk/privacy*`; a debug build
+  against the local server links `http://localhost:8787/privacy`, which it refuses) and the
+  project's pages on GitHub (`https://github.com/hotdogee/timer-app` and below, for Settings ›
+  About). The debug-only `smoke_mark` command and its
   grant (`capabilities/debug/`, which `build.rs` reads only for debug builds) are not in release
   builds.
 

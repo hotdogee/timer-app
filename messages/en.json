@@ -52,6 +52,8 @@
   "empty_hint": "Add a timer or a stopwatch to get started.",
   "empty_new_timer": "New timer",
   "empty_new_stopwatch": "New stopwatch",
+  "home_about": "{app} is a keyboard-first timer and stopwatch. Sign in to sync your cards across devices.",
+  "home_privacy": "Privacy policy",
 
   "palette_label": "Command palette",
   "palette_search_label": "Search commands",

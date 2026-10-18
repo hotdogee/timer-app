@@ -766,7 +766,8 @@ describe('About', () => {
     const privacy = [...target.querySelectorAll<HTMLAnchorElement>('a[href]')].find(
       (a) => a.textContent.trim() === 'Privacy policy',
     )
-    expect(privacy?.href).toBe('https://github.com/hotdogee/timer-app/blob/main/docs/privacy.md')
+    // The policy's page on the app's own site (the desktop app opens it on the production site).
+    expect(privacy?.getAttribute('href')).toBe('/privacy')
     expect(privacy?.target).toBe('_blank')
   })
 })

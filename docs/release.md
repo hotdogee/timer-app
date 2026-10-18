@@ -190,7 +190,7 @@ Tauri makes EXE and MSI installers, not MSIX, so the Store lists the app as an "
 3. **Host it.** Rename it so it cannot be mistaken for the regular installer, and attach it to the version's GitHub Release: `gh release upload vX.Y.Z timer-app_X.Y.Z_windows_x64_store.exe`. Its URL, `https://github.com/hotdogee/timer-app/releases/download/vX.Y.Z/timer-app_X.Y.Z_windows_x64_store.exe`, is versioned and never changes. (Not `-setup.exe`: the winget renderer picks the release's `*-setup.exe` files.)
 4. **Partner Center** › Apps and games › New product › EXE or MSI app. Reserve the name (it must be free in the Store). Then fill in the submission:
    - Packages: the URL, architecture x64 (and Arm64 if built), the languages (English, Traditional Chinese, Japanese), installer parameters: silent `/S`.
-   - Properties: category Productivity (or Utilities & tools); the privacy policy URL (required, since the app has accounts; spec Q23).
+   - Properties: category Productivity (or Utilities & tools); the privacy policy URL `https://timer.hanlin.uk/privacy` (required, since the app has accounts; spec Q23).
    - Age ratings questionnaire, Store listing (description, at least one screenshot, the logo), pricing Free.
    - Submit. Certification takes a few days.
 5. **Each release** that should reach new Store users: build the Store installer for the version, upload it, and submit an update with the new package URL. Existing Store installs update themselves through the app's updater either way.
@@ -221,7 +221,7 @@ The pieces below are placeholders or decisions only the owner can make. Several 
 - [ ] **Homebrew tap**: create `hotdogee/homebrew-tap` and `HOMEBREW_TAP_TOKEN`; the cask is `timer-app` (permanent: users type it).
 - [ ] **Microsoft Store**: a Partner Center account, whether to list the app at all, and the name reservation (the name must be free in the Store).
 - [ ] **Cloudflare**: the account, the domain on it, the plan (Workers Free to start), the one-time setup in [deploy.md](deploy.md), the two deploy secrets (in the `production` environment, then also the variable `DEPLOY_ON_RELEASE` = `true`), and whether deploys need an approval.
-- [ ] **Privacy policy (spec Q23)**: fill in the operator and contact, publish it; the Store listing needs its URL.
+- [x] **Privacy policy (spec Q23)**: done 2026-10-18. The operator (Han Lin) and the contact (hotdogee@gmail.com) are filled in, and the policy is public at `https://timer.hanlin.uk/privacy`, which every build renders from `docs/privacy.md` ([deploy.md › Privacy](deploy.md#privacy)). Give that address in the Store listing and on the Google consent screen.
 - [ ] **First version number**: `pnpm release minor` makes 0.1.0 from today's 0.0.0; `pnpm release 1.0.0` is the other choice.
 - [ ] **Icons (spec Q22)**: the placeholder ships in every installer, the PWA and the favicon; `pnpm icons` regenerates all of them from `public/icon.svg`. The macOS icon has no Apple-style margin yet.
 - [ ] **macOS minimum** 11.0 (`bundle.macOS.minimumSystemVersion`). The web code needs Safari 16's engine (the app's webview is the system WebKit), which macOS 11 and 12 have only after a Safari update; macOS 13 ships with it, so 13.0 is the floor that cannot meet an older engine.
@@ -234,7 +234,7 @@ The pieces below are placeholders or decisions only the owner can make. Several 
 One commit, before the first release. `git grep -n -I -e "Timer App" -e timer-app -e timerapp -e timer.example.com` lists every place; most are text. The ones that matter:
 
 - `src-tauri/tauri.conf.json`: `productName`, `identifier`, the main window's `title`, `bundle.shortDescription` and `longDescription`, the content security policy's `https://` and `wss://` origin, `bundle.homepage` and the updater endpoint (if the repository moves). Also `tauri.local-server.json` (the same policy) and the `-d` description in `tauri.release.windows.json`.
-- `src-tauri/capabilities/default.json`: the opener's `https://<domain>/device*` entry (`pnpm test` fails until it matches the policy), and the opener tests in `src-tauri/src/lib.rs`.
+- `src-tauri/capabilities/default.json`: the opener's `https://<domain>/device*` and `https://<domain>/privacy*` entries (`pnpm test` fails until both match the policy), and the opener tests in `src-tauri/src/lib.rs`.
 - The name the user sees: `messages/*.json` (`app_name`, the tray and hotkey labels), `index.html`'s title, the web app manifest in `vite.config.ts`, the mini window's title in `src-tauri/src/mini.rs`, the tray tooltip in `src-tauri/src/tray.rs`.
 - The credential store's service name in `src-tauri/src/token_store.rs` (a rename signs desktop users out once).
 - `server/wrangler.jsonc` (the route), the Worker secrets `BETTER_AUTH_URL` and `EMAIL_FROM`, and each sign-in provider's callback URLs ([deploy.md](deploy.md)).

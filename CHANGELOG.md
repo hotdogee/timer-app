@@ -8,6 +8,8 @@ breaks of release notes as they are).
 
 ## Unreleased
 
+**Privacy policy page.** The privacy policy is now a page of the app's own site, https://timer.hanlin.uk/privacy, with the operator and the contact address filled in; Settings › About, Settings › Account and the device approval page link it (the desktop app opens it in the browser), and the web app keeps it for offline reading. On the web, a line under the cards says what the app is and links the policy too. The winget package's privacy link is the same page.
+
 ## v0.1.0 - 2026-10-18
 
 **Timer engine (M1).** Timers and stopwatches whose time is derived from timestamps, never counted, so they stay right across sleep, throttled tabs, reloads and restarts. Typed digits shift in from the right (`13030` is 1:30:30), are shown as typed and normalized on Start (`90` seconds becomes 1:30). Times read compact (`4:53`) or fixed (`00:04:53`); countdowns round up, so the alarm starts the moment the display reaches `0:00`, and the stopwatch shows centiseconds.

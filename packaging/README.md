@@ -13,7 +13,9 @@ is a template, and the winget package and the Homebrew tap are created as descri
 
 Both scripts read the app's name, publisher, descriptions, homepage, bundle id and minimum macOS
 version from `src-tauri/tauri.conf.json`, and the license from `package.json`, so the packages say
-what the installers say. The version is the app's (`pnpm version:check`), or `--version`.
+what the installers say. The winget manifests' `PrivacyUrl` is the privacy policy's page on the
+production site, `/privacy` on the origin `node scripts/release.mjs --print-origin` prints. The
+version is the app's (`pnpm version:check`), or `--version`.
 
 ## What a release must contain
 

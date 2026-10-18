@@ -283,8 +283,10 @@ export function parseCsp(csp) {
 /**
  * The production sync server's origin, as the desktop app's configuration allows it: the one
  * `https://` origin in the content security policy's `connect-src` (with `wss://` on the same
- * host, for the sync socket), whose `/device` page the main window's browser opener may open.
- * Throws a {@link ReleaseError} saying what disagrees.
+ * host, for the sync socket), whose `/device` page and `/privacy` policy the main window's
+ * browser opener may open (the sign-in approval, and Settings › About and Account's link to the
+ * policy, `${apiOrigin()}/privacy` in a desktop build). Throws a {@link ReleaseError} saying what
+ * disagrees.
  */
 export function productionOrigin(tauriConfig, capability) {
   const connect = parseCsp(tauriConfig.app?.security?.csp ?? '').get('connect-src') ?? []
@@ -309,6 +311,11 @@ export function productionOrigin(tauriConfig, capability) {
   const urls = (opener?.allow ?? []).map((entry) => entry.url)
   if (!urls.includes(`${origin}/device*`)) {
     throw new ReleaseError(`the browser opener may not open ${origin}/device* (the sign-in page)`)
+  }
+  if (!urls.includes(`${origin}/privacy*`)) {
+    throw new ReleaseError(
+      `the browser opener may not open ${origin}/privacy* (the privacy policy)`,
+    )
   }
   return origin
 }
