@@ -35,6 +35,8 @@
     editing?: boolean
     /** The card whose name field is open outside edit mode (F2), if any. */
     renamingId?: cards.CardId | null
+    /** A card's name was clicked: open its name field, as F2 does for the selected card. */
+    onrename?: ((id: cards.CardId) => void) | undefined
     onrenameend?: (() => void) | undefined
     /**
      * A card's delete button was pressed (edit mode). The app may ask first (the confirm-delete
@@ -54,6 +56,7 @@
     ontyped,
     editing = false,
     renamingId = null,
+    onrename,
     onrenameend,
     ondelete,
     onstart,
@@ -314,6 +317,9 @@
             {editing}
             renaming={card.id === renamingId}
             inert={isolate !== null && isolate !== card.id}
+            onrename={() => {
+              onrename?.(card.id)
+            }}
             {onrenameend}
             ondelete={() => {
               remove(card.id)
@@ -332,6 +338,9 @@
             {editing}
             renaming={card.id === renamingId}
             inert={isolate !== null && isolate !== card.id}
+            onrename={() => {
+              onrename?.(card.id)
+            }}
             {onrenameend}
             ondelete={() => {
               remove(card.id)

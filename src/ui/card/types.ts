@@ -10,6 +10,8 @@ export interface CardShellProps {
   renaming: boolean
   /** Out of reach while another card is the fullscreen overlay (native fullscreen does this). */
   inert?: boolean
+  /** The name was clicked: rename this card, as F2 does (the app selects it and sets `renaming`). */
+  onrename?: (() => void) | undefined
   /** The rename field closed (committed or reverted). */
   onrenameend?: (() => void) | undefined
   /**

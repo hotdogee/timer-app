@@ -12,6 +12,16 @@ declare const __APP_VERSION__: string
  */
 declare const __DESKTOP__: boolean
 
+/**
+ * The emoji picker's data in one app language (`virtual:emoji-data/en`, `…/zh-TW`, `…/ja`), made
+ * from emojibase-data at build time by the `emojiData` plugin in vite.config.ts. Import it only
+ * through `loadEmojiDataset` (src/ui/emoji/data.ts), which keeps it a lazy chunk.
+ */
+declare module 'virtual:emoji-data/*' {
+  const dataset: import('./ui/emoji/data').EmojiDataset
+  export default dataset
+}
+
 interface ImportMetaEnv {
   /**
    * The sync server's origin for a build served from elsewhere (the desktop app, M5), such as

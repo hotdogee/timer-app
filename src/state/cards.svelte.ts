@@ -75,6 +75,11 @@ export interface CardStore {
    */
   moveNeighbor(id: cards.CardId, direction: cards.Direction, columns: number): void
   setMuted(id: cards.CardId, muted: boolean): void
+  /**
+   * Sets a card's icon to an emoji, or back to its kind's icon with `null`; an icon that is not
+   * an emoji (`cards.isCardIcon`) and an unknown id do nothing.
+   */
+  setIcon(id: cards.CardId, icon: string | null): void
   /** Selects a card; an unknown id does nothing. */
   select(id: cards.CardId): void
   /** Moves the selection on a grid of `columns` columns (arrow keys); see `cards.selectNeighbor`. */
@@ -197,6 +202,9 @@ export function createCardStore(deps: CardStoreDeps): CardStore {
     },
     setMuted(id, muted) {
       list = cards.setMuted(current(), id, muted)
+    },
+    setIcon(id, icon) {
+      list = cards.setIcon(current(), id, icon)
     },
     select(id) {
       list = cards.selectCard(current(), id)

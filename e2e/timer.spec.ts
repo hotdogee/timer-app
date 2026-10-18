@@ -127,3 +127,42 @@ test('typed overflow is normalized on start (90 seconds runs as 1:30)', async ({
   await page.keyboard.press('r')
   await expect(digitsOf(card)).toHaveText('1:30')
 })
+
+test('hovering the time shows steppers that change the duration', async ({ page }) => {
+  await openApp(page)
+  const card = selectedCard(page)
+  const display = digitsOf(card)
+  await expect(display).toHaveText('5:00')
+
+  await display.hover()
+  const addMinute = card.getByRole('button', { name: 'Add a minute', exact: true })
+  await expect(addMinute).toBeVisible()
+  await addMinute.click()
+  await expect(display).toHaveText('6:00')
+  await card.getByRole('button', { name: 'Subtract a second', exact: true }).click()
+  await expect(display).toHaveText('5:59')
+  // The engine carries: a minute less than 1:59 is 0:59.
+  const subtractMinute = card.getByRole('button', { name: 'Subtract a minute', exact: true })
+  for (let press = 0; press < 5; press++) await subtractMinute.click()
+  await expect(display).toHaveText('0:59')
+  // No minute left to take away: that ▼ is disabled rather than clamping to 0:00.
+  await expect(subtractMinute).toBeDisabled()
+  await expect(card.getByRole('button', { name: 'Subtract a second', exact: true })).toBeEnabled()
+
+  // ▲ and ▼ over minutes and seconds, all out of the tab order (the keyboard types digits).
+  const steppers = card.getByRole('button', { name: /^(Add|Subtract) an? (hour|minute|second)$/ })
+  await expect(steppers).toHaveCount(4)
+  for (const stepper of await steppers.all()) {
+    await expect(stepper).toHaveAttribute('tabindex', '-1')
+  }
+
+  // None while digits are typed, nor while the timer runs. A press left focus where it was, so
+  // Space starts the timer rather than pressing a stepper again.
+  await page.keyboard.type('1')
+  await expect(steppers).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(steppers).toHaveCount(4)
+  await page.keyboard.press('Space')
+  await expect(card).toHaveAttribute('data-phase', 'running')
+  await expect(steppers).toHaveCount(0)
+})

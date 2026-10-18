@@ -66,7 +66,10 @@ interface Held {
   readonly position: number
 }
 
-/** The cells a card's timer or stopwatch state lives in (all but kind, name, createdAt, muted). */
+/**
+ * The cells a card's timer or stopwatch state lives in: all but the card's own (kind, name,
+ * createdAt, muted, icon) and its grid position.
+ */
 const STATE_CELLS: ReadonlySet<string> = new Set<keyof CardRow>([
   'phase',
   'duration',

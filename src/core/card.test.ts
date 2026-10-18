@@ -11,6 +11,8 @@ import {
   DEFAULT_TIMER_DURATION,
   EMPTY_LIST,
   findCard,
+  isCardIcon,
+  MAX_ICON_LENGTH,
   moveCard,
   moveNeighbor,
   neighborIndex,
@@ -23,6 +25,7 @@ import {
   selectCard,
   selectedCard,
   selectNeighbor,
+  setIcon,
   setMuted,
   settleAll,
   updateStopwatch,
@@ -396,6 +399,104 @@ describe('setMuted', () => {
     const list = grid(2)
     expect(setMuted(list, 'c0', false)).toBe(list)
     expect(setMuted(list, 'nope', true)).toBe(list)
+  })
+})
+
+describe('isCardIcon', () => {
+  it.each([
+    ['a single emoji', '🍵'],
+    ['a flag', '🇹🇼'],
+    ['a keycap', '1️⃣'],
+    ['a ZWJ sequence', '👩‍💻'],
+    ['a skin-toned emoji', '👋🏽'],
+    ['a subdivision flag (tags)', '🏴󠁧󠁢󠁥󠁮󠁧󠁿'],
+    ['a text-style pictograph with VS16', '☺️'],
+    ['a family', '👨‍👩‍👧‍👦'],
+  ])('accepts %s', (_, icon) => {
+    expect(isCardIcon(icon)).toBe(true)
+  })
+
+  it.each([
+    ['an empty string', ''],
+    ['blanks', '  '],
+    ['text', 'abc'],
+    ['text around an emoji', 'a🍵'],
+    ['an emoji with a space', '🍵 '],
+    ['a bare skin tone', '🏻'],
+    ['a bare joiner', '\u200D'],
+    ['a bare variation selector', '\uFE0F'],
+    ['a digit or # without a keycap', '#'],
+    ['a lone surrogate', '\uD83C'],
+    ['too many code units', '🍵'.repeat(MAX_ICON_LENGTH / 2 + 1)],
+  ])('refuses %s', (_, icon) => {
+    expect(isCardIcon(icon)).toBe(false)
+  })
+
+  it('refuses what is not a string', () => {
+    for (const value of [undefined, null, 1, ['🍵'], { icon: '🍵' }]) {
+      expect(isCardIcon(value)).toBe(false)
+    }
+  })
+
+  it('accepts icons up to the limit', () => {
+    expect(isCardIcon('🍵'.repeat(MAX_ICON_LENGTH / 2))).toBe(true)
+  })
+})
+
+describe('setIcon', () => {
+  it('sets, replaces and removes one card’s icon, keeping everything else', () => {
+    const list = listOf([tc('a'), sc('b')], 'a')
+    const set = setIcon(list, 'b', '🍵')
+    expect(set.cards[1]).toEqual({ ...sc('b'), icon: '🍵' })
+    expect(set.cards[0]).toBe(list.cards[0])
+    expect(set.selectedId).toBe('a')
+    const replaced = setIcon(set, 'b', '🏃')
+    expect(replaced.cards[1]?.icon).toBe('🏃')
+    const removed = setIcon(replaced, 'b', null)
+    expect(removed).toEqual(list)
+    // Removed, not set to undefined: a stored or synced card never carries an empty key.
+    expect(Object.hasOwn(removed.cards[1] ?? {}, 'icon')).toBe(false)
+  })
+
+  it('returns the list unchanged for an unknown id, an invalid icon or no change', () => {
+    const list = listOf([tc('a'), { ...tc('b'), icon: '🍵' }])
+    expect(setIcon(list, 'nope', '🍵')).toBe(list)
+    expect(setIcon(list, 'a', 'abc')).toBe(list)
+    expect(setIcon(list, 'a', '')).toBe(list)
+    expect(setIcon(list, 'b', '🍵')).toBe(list)
+    expect(setIcon(list, 'a', null)).toBe(list)
+    expect(setIcon(EMPTY_LIST, 'a', '🍵')).toBe(EMPTY_LIST)
+  })
+
+  it('round-trips every card through an icon and its removal (property)', () => {
+    const icon = fc.constantFrom('🍵', '🇹🇼', '1️⃣', '👩‍💻', '🏴󠁧󠁢󠁥󠁮󠁧󠁿')
+    const card = fc.oneof(
+      fc
+        .record({ id: fc.string({ minLength: 1 }), name: fc.string() })
+        .map(({ id, name }) => tc(id, name)),
+      fc
+        .record({ id: fc.string({ minLength: 1 }), name: fc.string() })
+        .map(({ id, name }) => sc(id, name)),
+    )
+    fc.assert(
+      fc.property(card, icon, (c, emoji) => {
+        const list = listOf([c])
+        const set = setIcon(list, c.id, emoji)
+        expect(set.cards[0]).toEqual({ ...c, icon: emoji })
+        expect(JSON.parse(JSON.stringify(set))).toEqual(set)
+        expect(setIcon(set, c.id, null)).toEqual(list)
+      }),
+    )
+  })
+
+  it('keeps the icon through the other operations', () => {
+    const list = setIcon(listOf([tc('a', 'Tea'), tc('b')], 'a'), 'a', '🍵')
+    const edited = setMuted(renameCard(moveCard(list, 'a', 1), 'a', 'Green tea'), 'a', true)
+    expect(findCard(edited, 'a')).toMatchObject({ name: 'Green tea', muted: true, icon: '🍵' })
+    const card = findCard(list, 'a')
+    if (card === undefined) throw new Error('no card')
+    const back = restoreCard(removeCard(list, 'a'), card, 0)
+    expect(findCard(back, 'a')?.icon).toBe('🍵')
   })
 })
 
@@ -815,6 +916,7 @@ describe('random operation sequences', () => {
     | { op: 'rename'; id: CardId; name: string }
     | { op: 'move'; id: CardId; to: number }
     | { op: 'mute'; id: CardId; muted: boolean }
+    | { op: 'icon'; id: CardId; icon: string | null }
     | { op: 'neighbor'; direction: Direction; columns: number }
     | { op: 'timer'; id: CardId; action: 'start' | 'pause' | 'reset' }
     | { op: 'stopwatch'; id: CardId; action: 'start' | 'lap' | 'reset' }
@@ -833,6 +935,11 @@ describe('random operation sequences', () => {
     fc.record({ op: fc.constant('rename' as const), id: idArb, name: fc.string({ maxLength: 6 }) }),
     fc.record({ op: fc.constant('move' as const), id: idArb, to: indexArb }),
     fc.record({ op: fc.constant('mute' as const), id: idArb, muted: fc.boolean() }),
+    fc.record({
+      op: fc.constant('icon' as const),
+      id: idArb,
+      icon: fc.constantFrom('🍵', '🇹🇼', 'abc', null),
+    }),
     fc.record({
       op: fc.constant('neighbor' as const),
       direction: fc.constantFrom<Direction>('left', 'right', 'up', 'down'),
@@ -895,6 +1002,9 @@ describe('random operation sequences', () => {
           break
         case 'mute':
           list = setMuted(list, step.id, step.muted)
+          break
+        case 'icon':
+          list = setIcon(list, step.id, step.icon)
           break
         case 'neighbor':
           list = selectNeighbor(list, step.direction, step.columns)

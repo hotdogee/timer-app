@@ -285,6 +285,18 @@ describe('editing and selection', () => {
     expect(store.selected?.id).toBe(b)
   })
 
+  it('sets and removes a card’s icon through the model', () => {
+    const { store } = setup()
+    const a = store.addTimer()
+    const b = store.addStopwatch()
+    store.setIcon(a, '🍵')
+    expect(store.cards.map((card) => card.icon)).toEqual(['🍵', undefined])
+    // The selection is not the icon's business.
+    expect(store.selected?.id).toBe(b)
+    store.setIcon(a, null)
+    expect(cards.findCard(store.list, a)).not.toHaveProperty('icon')
+  })
+
   it('leaves the list object alone when nothing changes', () => {
     const { store } = setup()
     const a = store.addTimer()
@@ -292,6 +304,9 @@ describe('editing and selection', () => {
     store.rename(a, '   ')
     store.move(a, 5)
     store.setMuted(a, false)
+    store.setIcon(a, 'not an emoji')
+    store.setIcon(a, null)
+    store.setIcon('nope', '🍵')
     store.select('nope')
     store.selectNeighbor('left', 3)
     store.settle(NOW)

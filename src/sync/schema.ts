@@ -3,7 +3,9 @@
  * them and the app's own values: cards, presets and both settings groups.
  *
  * - `synced` (a `MergeableStore`, synced across tabs now and devices in M4) holds the `cards` and
- *   `presets` tables and, as values, the behavior settings plus `schemaVersion` and `seededAt`.
+ *   `presets` tables and, as values, the behavior settings plus `schemaVersion` and `seededAt`. A
+ *   card's row has its kind, name, creation time, mute flag, icon (only when it has one), grid
+ *   position and phase, and the cells of that phase.
  * - `device` (a plain `Store`, never synced) holds the appearance settings and the language as
  *   values, plus `schemaVersion`; on the desktop also the desktop settings and the desktop
  *   sign-in's bearer token.
@@ -40,6 +42,8 @@ export const SYNCED_TABLES_SCHEMA = {
     name: { type: 'string' },
     createdAt: { type: 'number' },
     muted: { type: 'boolean' },
+    /** The card's emoji (`cards.isCardIcon`); absent for the kind's default icon. */
+    icon: { type: 'string' },
     /** The card's index in the grid. */
     position: { type: 'number' },
     /** Timer: `idle|running|paused|ringing`; stopwatch: `idle|running|paused`. */
@@ -138,6 +142,7 @@ export interface CardRow {
   name?: string
   createdAt?: number
   muted?: boolean
+  icon?: string
   position?: number
   phase?: string
   duration?: number
@@ -261,7 +266,14 @@ function stopwatchCells(s: StopwatchState): CardRow {
 
 /**
  * The `cards` row for `card` at grid index `position`. Only the cells of the card's phase are
- * present, so writing the row with `setRow` also deletes the cells of its previous phase.
+ * present, so writing the row with `setRow` also deletes the cells of its previous phase; the
+ * `icon` cell likewise is present only while the card has an icon, so removing it deletes the
+ * cell.
+ *
+ * Version 0.1.0 does not know the `icon` cell: it reads cards without it and writes the cells it
+ * knows one by one (sync/cards-bridge), so it leaves an icon set on another device alone. Where
+ * it writes a whole row (a delete it undoes, an import), the card comes back without its icon
+ * until that device updates; acceptable, since people update all their devices.
  */
 export function cardToRow(card: cards.Card, position: number): CardRow {
   const state = card.kind === 'timer' ? timerCells(card.timer) : stopwatchCells(card.stopwatch)
@@ -270,6 +282,7 @@ export function cardToRow(card: cards.Card, position: number): CardRow {
     name: card.name,
     createdAt: card.createdAt,
     muted: card.muted,
+    ...(card.icon === undefined ? {} : { icon: card.icon }),
     position,
     ...state,
   }
@@ -309,8 +322,9 @@ function rowToStopwatch(row: CardRow): StopwatchState {
 /**
  * The card stored in row `id`, or `null` when the row is not a card (no or an unknown `kind`, or
  * an empty id). Other cells fall back one by one: a blank name to the kind's default name, a bad
- * `createdAt` to 0, `muted` to false, a timer's bad duration to 5:00, a phase whose fields are
- * missing to idle, and unreadable laps to none. Cells of other phases are ignored.
+ * `createdAt` to 0, `muted` to false, an icon that is not an emoji (`cards.isCardIcon`) to none,
+ * a timer's bad duration to 5:00, a phase whose fields are missing to idle, and unreadable laps
+ * to none. Cells of other phases are ignored.
  */
 export function rowToCard(id: cards.CardId, row: CardRow): cards.Card | null {
   const kind = row.kind
@@ -318,9 +332,10 @@ export function rowToCard(id: cards.CardId, row: CardRow): cards.Card | null {
   const name = cardName(row.name, kind)
   const createdAt = isTime(row.createdAt) ? row.createdAt : 0
   const muted = row.muted === true
+  const icon = cards.isCardIcon(row.icon) ? { icon: row.icon } : {}
   return kind === 'timer'
-    ? { id, kind, name, createdAt, muted, timer: rowToTimer(row) }
-    : { id, kind, name, createdAt, muted, stopwatch: rowToStopwatch(row) }
+    ? { id, kind, name, createdAt, muted, ...icon, timer: rowToTimer(row) }
+    : { id, kind, name, createdAt, muted, ...icon, stopwatch: rowToStopwatch(row) }
 }
 
 /** Whether two rows hold exactly the same cells. */

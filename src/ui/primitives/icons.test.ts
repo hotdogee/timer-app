@@ -38,6 +38,9 @@ const REQUIRED: readonly IconName[] = [
   'cloud_done',
   'cloud_off',
   'cloud_sync',
+  // The steppers over an idle timer's time (▲ and ▼ on each field).
+  'keyboard_arrow_up',
+  'keyboard_arrow_down',
 ]
 
 describe('icons', () => {

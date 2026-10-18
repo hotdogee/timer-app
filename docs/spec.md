@@ -33,7 +33,7 @@ Design references in [design/](design/):
 
 Visuals follow the Google (Material 3) card, except the Timer/Stopwatch toggle is replaced by the card's type icon (⧗ timer, ◷ stopwatch) and name. Card colors come from the seed's Material palettes: in dark mode the card is secondary tone 20 on a neutral-variant tone 14 page, and chips, tonal buttons and the ring track are secondary tone 27; in light mode the card is white on neutral-variant tone 94, with secondary tone 90 for the tonal parts. Material's `surface-container` roles looked too dark and grey beside the reference card. Hero digits are 17% of the ring diameter.
 
-Header: icon and name, mute, fullscreen, always-on-top mini window (desktop, and Chromium browsers through Document Picture-in-Picture; hidden elsewhere).
+Header: icon and name, mute, fullscreen, always-on-top mini window (desktop, and Chromium browsers through Document Picture-in-Picture; hidden elsewhere). Clicking the name opens the rename field (the same as `F2`). Clicking the icon opens an emoji picker: a searchable (label and keywords, in the UI language and in English), scrollable grid of every Unicode emoji by category; the chosen emoji replaces the type icon on the card and in the mini window, syncs with the card, and "Use the default icon" puts the type icon back. Skin-tone variants are not offered, and emoji the device's font cannot draw are left out.
 
 Fullscreen uses the browser Fullscreen API; where it is unavailable (iOS Safari) the card expands into an overlay. `Esc` leaves either. The fullscreen card follows the selection, so arrow keys switch which card fills the screen.
 
@@ -43,7 +43,7 @@ Mini window: a compact card floating above other apps. Desktop uses a Tauri alwa
 
 | State | Display | Controls |
 |---|---|---|
-| Idle | Set duration (`5:00`) with an underline; quick-add chips `+0:30` `+1:00` `+5:00` (very short cards drop `+0:30`, then `+5:00`) | Full-width Start |
+| Idle | Set duration (`5:00`) with an underline; hovering it shows ▲ and ▼ over each field (hours, minutes, seconds) that add or subtract one unit, repeating while held (always shown on touch devices, which have no keyboard for digit entry); quick-add chips `+0:30` `+1:00` `+5:00` (very short cards drop `+0:30`, then `+5:00`) | Full-width Start |
 | Running | Remaining time inside the ring; the arc grows clockwise from 12 o'clock with elapsed progress; end-time chip ("🔔 2:47 PM"); chips stay available (stacked beside the ring on short cards) | Pause, Reset |
 | Paused | Remaining time; ring frozen; chips stay available | Resume, Reset |
 | Time's up | Ring full; label "Time's up"; overtime counting up (`-0:12`); the ring pulses gently (off with reduced motion) while the label stays steady for contrast; sound loops | Dismiss, Restart |
@@ -80,6 +80,7 @@ Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the comm
 - Leading zeros and a seventh digit are ignored, so the buffer holds at most six significant digits.
 - One card is always selected (highlighted); arrow keys move the selection. Digits edit the selected timer when it isn't running; on a paused timer they replace the duration and reset it; on a ringing timer they dismiss it and set the new duration. On a stopwatch or a running timer, digits do nothing.
 - `Enter` with nothing typed starts the selected timer, or dismisses it when ringing.
+- With a mouse or a finger, the ▲ and ▼ buttons over an idle timer's fields step the duration by an hour, a minute or a second; they are not tab stops (digit entry is the keyboard way).
 
 ### Shortcuts
 
@@ -255,3 +256,5 @@ New questions continue from Q25.
 | 2026-10-18 | Q13 | Final identifiers: the name stays "Timer App" (`timer-app`), the bundle identifier is `uk.hanlin.timer`, the publisher "Han Lin", the sync server `https://timer.hanlin.uk` (a subdomain of the owner's `hanlin.uk`, also Resend's sending domain), the MSI upgrade code is pinned. None of these change after the first public release. Windows builds ship unsigned and macOS builds ad-hoc signed for now; the updater key exists. |
 | 2026-10-18 | Q23 | Privacy policy final: operator Han Lin, contact hotdogee@gmail.com. Published at `https://timer.hanlin.uk/privacy`, rendered at build time from `docs/privacy.md` by a strict converter that fails the build on placeholders or unknown syntax; linked from the web home page's footer, Settings › About, Account and the device page, and used as the winget and Store listing URL. |
 | 2026-10-18 | Q16 | Apple sign-in deferred: it needs the Apple Developer Program, which the owner is not paying for now. Email codes (Resend), Google and GitHub are live in production; the Apple code path stays and turns on when its secrets exist. |
+| 2026-10-19 | — | Card header: the name is a button that opens the rename field (same as `F2`); the type icon is a button that opens an emoji picker (every Unicode emoji by category, searched by label and keywords in the UI language and in English; base emoji only, no skin-tone variants; emoji the device cannot draw are hidden by a canvas probe per Unicode version). The icon is a `cards.icon` cell, synced and exported (format 1 stays: the field is optional). A 0.1.0 client leaves the cell alone (it writes cells one by one) except where it writes a whole row (undo delete, import), which drops the icon until it updates. The emoji data is generated at build time from `emojibase-data` into lazy per-language chunks that the service worker caches on first use rather than precaching. |
+| 2026-10-19 | — | Idle timer: hovering the time shows ▲/▼ over each field that add or subtract one unit (hold to repeat); always visible on touch devices; not in the tab order. Rows are ghost copies of the fields in the digits font, so they line up without measuring. |

@@ -3,7 +3,9 @@
  * icons ship. Every symbol is one `<path>` on a `0 -960 960 960` view box; we keep the path data.
  *
  * The four arrows draw the arrow keys on key caps (`KeyLabel.svelte`) and the presets' reorder
- * buttons. The clouds are the sync status (the action bar, Settings › Account). Play, pause and the volume icons use the filled variant, as the reference card does
+ * buttons; the two chevrons (`keyboard_arrow_up`, `keyboard_arrow_down`) are the steppers over an
+ * idle timer's time. The clouds are the sync status (the action bar, Settings › Account). Play,
+ * pause and the volume icons use the filled variant, as the reference card does
  * (docs/design/card-*.png). `done` is the same glyph as `check` (Material Symbols 0.48 dropped the
  * separate file).
  */
@@ -25,6 +27,8 @@ import fullscreen from '@material-symbols/svg-400/outlined/fullscreen.svg?raw'
 import fullscreenExit from '@material-symbols/svg-400/outlined/fullscreen_exit.svg?raw'
 import hourglassTop from '@material-symbols/svg-400/outlined/hourglass_top.svg?raw'
 import keyboard from '@material-symbols/svg-400/outlined/keyboard.svg?raw'
+import keyboardArrowDown from '@material-symbols/svg-400/outlined/keyboard_arrow_down.svg?raw'
+import keyboardArrowUp from '@material-symbols/svg-400/outlined/keyboard_arrow_up.svg?raw'
 import moreVert from '@material-symbols/svg-400/outlined/more_vert.svg?raw'
 import notifications from '@material-symbols/svg-400/outlined/notifications.svg?raw'
 import pause from '@material-symbols/svg-400/outlined/pause-fill.svg?raw'
@@ -58,6 +62,8 @@ const SOURCES = {
   fullscreen_exit: fullscreenExit,
   hourglass_top: hourglassTop,
   keyboard,
+  keyboard_arrow_down: keyboardArrowDown,
+  keyboard_arrow_up: keyboardArrowUp,
   more_vert: moreVert,
   notifications,
   pause,

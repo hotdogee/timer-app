@@ -1,7 +1,8 @@
 <!--
   @component
   One card, compact, for the mini window (spec › Card header, Mini window): a header with the
-  card's type icon and name (the window's drag region on desktop), the always-on-top pin
+  card's icon (its emoji, else its kind's icon) and name (the window's drag region on desktop),
+  the always-on-top pin
   (`pinnable`: the desktop window; the web's Picture-in-Picture window is always on top) and a
   close button; the ring with the digits, sized to the window by container queries; and the card's
   main buttons (`miniControls`): Start or Pause (Resume, Dismiss), Reset or Restart, and `+1:00`
@@ -325,8 +326,12 @@
 
 <main class="mini" aria-labelledby={nameId} data-phase={phase}>
   <header class="header" data-tauri-drag-region {@attach keepSmall}>
-    <span class="type" data-tauri-drag-region>
-      <Icon name={card?.kind === 'stopwatch' ? 'timer' : 'hourglass_top'} />
+    <span class={['type', { emoji: card?.icon !== undefined }]} data-tauri-drag-region>
+      {#if card?.icon !== undefined}
+        {card.icon}
+      {:else}
+        <Icon name={card?.kind === 'stopwatch' ? 'timer' : 'hourglass_top'} />
+      {/if}
     </span>
     <h1 class="name" id={nameId} title={heading} data-tauri-drag-region>{heading}</h1>
     {#if pinnable}
@@ -443,6 +448,12 @@
     flex: none;
     color: var(--md-sys-color-primary);
     font-size: clamp(1rem, 9cqh, 1.375rem);
+  }
+
+  /* The card's emoji, in place of the kind's icon (display only: the main window changes it). */
+  .type.emoji {
+    font-family: var(--font-emoji);
+    line-height: 1;
   }
 
   .name {

@@ -31,6 +31,11 @@ export interface CardBase {
   readonly createdAt: EpochMs
   /** Whether the card's alarm is silenced. */
   readonly muted: boolean
+  /**
+   * The emoji the header shows in place of the kind's icon ({@link isCardIcon}); absent for the
+   * kind's default icon. Never stored as `undefined`: a card without an icon has no such key.
+   */
+  readonly icon?: string
 }
 
 export type TimerCard = CardBase & { readonly kind: 'timer'; readonly timer: TimerState }
@@ -73,6 +78,38 @@ function finiteTime(at: EpochMs): EpochMs {
 export function cardName(name: unknown, kind: CardKind): string {
   const trimmed = typeof name === 'string' ? name.trim() : ''
   return trimmed === '' ? DEFAULT_NAMES[kind] : trimmed
+}
+
+/**
+ * The longest card icon, in UTF-16 code units: room for the longest emoji sequences (a family
+ * with skin tones, a subdivision flag such as England's), but not for a paragraph of them.
+ */
+export const MAX_ICON_LENGTH = 32
+
+/** The characters an emoji is made of, joiners, variation selectors, keycaps and tags included. */
+const ICON_CHARS = /^[\p{Extended_Pictographic}\p{Emoji_Component}\p{Regional_Indicator}]+$/u
+
+/**
+ * What makes those characters an emoji rather than a bare component: a pictograph, a flag's
+ * regional indicator, or a keycap (`1️⃣` is a digit, VS16 and U+20E3).
+ */
+const ICON_BASE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20E3]/u
+
+/**
+ * Whether `value` can be a card's icon: a non-empty string of at most {@link MAX_ICON_LENGTH}
+ * code units made only of emoji characters, with at least one that draws something. Text
+ * (`"abc"`, blanks) and lone components (a skin tone, a joiner, `#`) are not icons. This is a
+ * check on the characters, not on Unicode's list of sequences: stored, synced and imported icons
+ * pass through it, and an emoji newer than this code still has to get through.
+ */
+export function isCardIcon(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_ICON_LENGTH &&
+    ICON_CHARS.test(value) &&
+    ICON_BASE.test(value)
+  )
 }
 
 /**
@@ -239,6 +276,24 @@ export function setMuted(list: CardList, id: CardId, muted: boolean): CardList {
   const card = list.cards[index]
   if (card === undefined || card.muted === muted) return list
   return replaceAt(list, index, { ...card, muted })
+}
+
+/**
+ * Sets card `id`'s icon to the emoji `icon`, or removes it with `null` (the card shows its kind's
+ * icon again; the key is deleted, not set to `undefined`). An unknown id, an icon that is not
+ * {@link isCardIcon}, and no change return `list` unchanged.
+ */
+export function setIcon(list: CardList, id: CardId, icon: string | null): CardList {
+  const index = indexOf(list, id)
+  const card = list.cards[index]
+  if (card === undefined || (icon !== null && !isCardIcon(icon))) return list
+  if (icon === null) {
+    if (card.icon === undefined) return list
+    const { icon: removed, ...rest } = card
+    void removed
+    return replaceAt(list, index, rest)
+  }
+  return card.icon === icon ? list : replaceAt(list, index, { ...card, icon })
 }
 
 /** Selects card `id`. An unknown id and the already selected card return `list` unchanged. */

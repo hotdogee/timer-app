@@ -15,6 +15,12 @@
   --font-cjk: system-ui;
   --font-ui: 'Roboto Flex Variable', var(--font-cjk), system-ui, sans-serif;
   --font-digits: var(--font-ui);
+  /*
+   * Card icons and the emoji picker: each system's color emoji font, so an emoji never draws in
+   * a text font's monochrome glyph (or Roboto Flex's). src/ui/emoji/support.ts probes with it.
+   */
+  --font-emoji:
+    'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif;
 
   /* Shape. */
   --radius-card: 16px;

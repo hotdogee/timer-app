@@ -536,6 +536,7 @@
       }}
       {editing}
       {renamingId}
+      onrename={startRename}
       onrenameend={endRename}
       ondelete={deleteCard}
       onstart={onStart}

@@ -8,6 +8,7 @@ import { defineConfig, type Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 import pkg from './package.json' with { type: 'json' }
+import { EMOJI_LOCALES, emojiDataset } from './scripts/emoji-data.mjs'
 import { privacyPageHtml } from './scripts/privacy-page.mjs'
 
 /** Set by `tauri dev` when targeting a physical mobile device; the dev server must listen on it. */
@@ -201,12 +202,49 @@ function privacyPage(): Plugin {
   }
 }
 
+/** The virtual modules of the emoji picker's data: `virtual:emoji-data/en`, `…/zh-TW`, `…/ja`. */
+const EMOJI_DATA_PREFIX = 'virtual:emoji-data/'
+/**
+ * The start of each data chunk's file name (`assets/emoji-data-en-<hash>.js`), so the service
+ * worker can tell them apart: they are cached when first fetched, not precached (see the Workbox
+ * options below).
+ */
+const EMOJI_DATA_CHUNK = 'emoji-data-'
+
+/**
+ * The emoji picker's data as one virtual module per app language, built from emojibase-data by
+ * scripts/emoji-data.mjs. The picker loads its language's module with `import()` the first time
+ * it opens (src/ui/emoji/data.ts), so each is a chunk of its own and emojibase-data itself never
+ * reaches the bundle. Only the app's languages resolve; any other id is left to other plugins.
+ * The resolved id's last segment names the chunk ({@link EMOJI_DATA_CHUNK} and the language).
+ */
+function emojiData(): Plugin {
+  const resolvedPrefix = `\0${EMOJI_DATA_PREFIX}${EMOJI_DATA_CHUNK}`
+  /** The app language `id` is the data of after `prefix`, if any. */
+  const localeOf = (id: string, prefix: string) =>
+    id.startsWith(prefix) ? EMOJI_LOCALES.find((locale) => id === prefix + locale) : undefined
+  return {
+    name: 'timer-app:emoji-data',
+    resolveId(id) {
+      const locale = localeOf(id, EMOJI_DATA_PREFIX)
+      return locale === undefined ? null : resolvedPrefix + locale
+    },
+    load(id) {
+      const locale = localeOf(id, resolvedPrefix)
+      return locale === undefined
+        ? null
+        : `export default ${JSON.stringify(emojiDataset(locale))}\n`
+    },
+  }
+}
+
 // Tauri-friendly settings follow https://v2.tauri.app/start/frontend/vite/
 export default defineConfig({
   plugins: [
     svelte(),
     tauriStaysLazy(),
     privacyPage(),
+    emojiData(),
     // Keep these options in step with the `i18n:compile` script in package.json.
     ...(vitest
       ? []
@@ -250,6 +288,22 @@ export default defineConfig({
         // The whole app, fonts included. The plugin adds manifest.webmanifest itself; matching it
         // here too would list it twice.
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // The emoji picker's data (about 570 kB over three languages) would nearly double the
+        // precache for a rarely used dialog: each language's chunk is fetched the first time a
+        // picker opens in it and kept from then on (cache first), hashed names keeping versions
+        // apart. Offline before that, the picker says the list could not be loaded.
+        globIgnores: [`**/${EMOJI_DATA_CHUNK}*.js`],
+        runtimeCaching: [
+          {
+            urlPattern: new RegExp(`/assets/${EMOJI_DATA_CHUNK}[^/]+\\.js$`),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'emoji-data',
+              expiration: { maxEntries: 6, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
         // Navigations to the server (an OAuth callback, a download from /api/export) must reach

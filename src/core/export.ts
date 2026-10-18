@@ -11,7 +11,7 @@
  */
 import * as v from 'valibot'
 
-import { cardName, type Card } from './card'
+import { cardName, isCardIcon, type Card } from './card'
 import {
   migrateDeviceSettings,
   migrateSyncedSettings,
@@ -159,8 +159,22 @@ const stopwatchState = v.variant('phase', [
   v.object({ phase: v.literal('paused'), accumulated: span, laps }),
 ])
 
-/** `Card` in card.ts. */
-const cardFields = { id, name: v.string(), createdAt: time, muted: v.boolean() }
+/**
+ * `Card` in card.ts. The icon is optional and, when present, an emoji: files without it (format
+ * 1 from 0.1.0) still read, and 0.1.0 reading a newer file drops it as an unknown field.
+ * `exactOptional`, so a card read back has no `icon` key rather than `icon: undefined`.
+ */
+const icon = v.pipe(
+  v.string(),
+  v.check((text: string) => isCardIcon(text)),
+)
+const cardFields = {
+  id,
+  name: v.string(),
+  createdAt: time,
+  muted: v.boolean(),
+  icon: v.exactOptional(icon),
+}
 const card = v.variant('kind', [
   v.object({ ...cardFields, kind: v.literal('timer'), timer: timerState }),
   v.object({ ...cardFields, kind: v.literal('stopwatch'), stopwatch: stopwatchState }),

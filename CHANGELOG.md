@@ -8,6 +8,8 @@ breaks of release notes as they are).
 
 ## Unreleased
 
+**Card icons, click to rename, duration steppers.** Click a card's name to rename it. Click its icon to pick an emoji from a searchable, scrollable list of every emoji by category (in the app's language and in English); the emoji shows on the card and in the mini window and syncs with the card. Hover an idle timer's time to get ▲ and ▼ buttons over the hours, minutes and seconds (hold to repeat); on phones and tablets they are always shown.
+
 **Privacy policy page.** The privacy policy is now a page of the app's own site, https://timer.hanlin.uk/privacy, with the operator and the contact address filled in; Settings › About, Settings › Account and the device approval page link it (the desktop app opens it in the browser), and the web app keeps it for offline reading. On the web, a line under the cards says what the app is and links the policy too. The winget package's privacy link is the same page.
 
 ## v0.1.0 - 2026-10-18

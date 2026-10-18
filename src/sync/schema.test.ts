@@ -66,10 +66,19 @@ const stopwatchState: fc.Arbitrary<StopwatchState> = fc.oneof(
   }),
   fc.record({ phase: fc.constant('paused' as const), accumulated: span, laps }),
 )
-const cardFields = { id, name, createdAt: time, muted: fc.boolean() }
+/** Card icons: emoji of every shape (absent from about half the cards). */
+const icon = fc.constantFrom('🍵', '🇹🇼', '1️⃣', '👩‍💻', '👋🏽', '🏴󠁧󠁢󠁥󠁮󠁧󠁿')
+const cardFields = { id, name, createdAt: time, muted: fc.boolean(), icon }
+const common = ['id', 'name', 'createdAt', 'muted', 'kind'] as const
 const card: fc.Arbitrary<cards.Card> = fc.oneof(
-  fc.record({ ...cardFields, kind: fc.constant('timer' as const), timer: timerState }),
-  fc.record({ ...cardFields, kind: fc.constant('stopwatch' as const), stopwatch: stopwatchState }),
+  fc.record(
+    { ...cardFields, kind: fc.constant('timer' as const), timer: timerState },
+    { requiredKeys: [...common, 'timer'] },
+  ),
+  fc.record(
+    { ...cardFields, kind: fc.constant('stopwatch' as const), stopwatch: stopwatchState },
+    { requiredKeys: [...common, 'stopwatch'] },
+  ),
 )
 
 const timerCard = (t: TimerState, extra: Partial<cards.TimerCard> = {}): cards.TimerCard => ({
@@ -166,6 +175,12 @@ describe('cardToRow', () => {
   it('keeps the mute flag', () => {
     expect(cardToRow({ ...cards.createTimerCard('a', 'T', 0), muted: true }, 0).muted).toBe(true)
   })
+
+  it('writes the icon cell only for a card with an icon', () => {
+    const plain = cards.createTimerCard('a', 'Tea', NOW)
+    expect(cardToRow({ ...plain, icon: '🍵' }, 0)).toMatchObject({ icon: '🍵' })
+    expect(cardToRow(plain, 0)).not.toHaveProperty('icon')
+  })
 })
 
 describe('rowToCard', () => {
@@ -178,6 +193,24 @@ describe('rowToCard', () => {
       }),
       { numRuns: 500 },
     )
+  })
+
+  it('reads the icon back, and a card without the cell has none', () => {
+    const row = cardToRow({ ...cards.createStopwatchCard('b', 'Run', NOW), icon: '🏃' }, 0)
+    expect(rowToCard('b', row)).toMatchObject({ icon: '🏃' })
+    const withoutIcon = { ...row }
+    delete withoutIcon.icon
+    expect(rowToCard('b', withoutIcon)).toEqual(cards.createStopwatchCard('b', 'Run', NOW))
+  })
+
+  it('reads an icon cell that is not an emoji as no icon', () => {
+    for (const cell of ['', '  ', 'tea', '🏻', '\u200D', '🍵'.repeat(20)]) {
+      const read = rowToCard('a', { ...timerRow, icon: cell })
+      expect(read).not.toHaveProperty('icon')
+    }
+    // A cell of another type (an older or newer app's) reads as none too.
+    const odd = { ...timerRow, icon: 7 } as unknown as CardRow
+    expect(rowToCard('a', odd)).not.toHaveProperty('icon')
   })
 
   it('is not a card without an id or a known kind', () => {
@@ -256,6 +289,9 @@ describe('sameCard', () => {
     expect(sameCard(a, { ...a })).toBe(true)
     expect(sameCard(a, { ...a, name: 'Coffee' })).toBe(false)
     expect(sameCard(a, { ...a, id: 'b' })).toBe(false)
+    expect(sameCard(a, { ...a, icon: '🍵' })).toBe(false)
+    expect(sameCard({ ...a, icon: '🍵' }, { ...a, icon: '🍵' })).toBe(true)
+    expect(sameCard({ ...a, icon: '🍵' }, { ...a, icon: '☕' })).toBe(false)
     expect(
       sameCard(a, { ...a, timer: { phase: 'running', duration: a.timer.duration, endsAt: 1 } }),
     ).toBe(false)

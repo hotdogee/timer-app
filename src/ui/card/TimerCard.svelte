@@ -1,14 +1,21 @@
 <!--
   @component
   A timer card (spec › Card › Timer). Idle: the duration over a rule, quick-add chips and a
-  full-width Start. Running: the ring fills clockwise around the time left, with the end time below
-  it; Pause and Reset. Paused: frozen; Resume and Reset. Time's up: full ring (pulsing),
-  overtime and "Time's up"; Dismiss and Restart. Typed digits (`typed`, only on the selected card)
-  show in the primary color; Start and the chips apply them first, as the keyboard does, and Reset
-  discards them.
+  full-width Start; hovering the duration shows ▲ and ▼ steppers over and under each of its fields
+  (always shown on touch screens), which add or take away an hour, a minute or a second, again and
+  again while held (a ▼ with less than its unit left is disabled). Running: the ring fills
+  clockwise around the time left, with the end time below it; Pause and Reset. Paused: frozen;
+  Resume and Reset. Time's up: full ring (pulsing), overtime and "Time's up"; Dismiss and Restart.
+  Typed digits (`typed`, only on the selected card) show in the primary color; Start and the chips
+  apply them first, as the keyboard does, and Reset discards them.
 
   Settings: the time style (compact or fixed), the overtime counter (off: a ringing timer stays at
   `0:00`) and the three quick-add amounts.
+
+  The steppers are for the pointer: out of the tab order (the keyboard types digits instead), and a
+  press leaves focus where it was, so Space and Enter go on starting the timer rather than pressing
+  the stepper again. Hidden, they ignore the pointer, so a click near the time never changes it
+  unseen.
 
   Only a running timer, or a ringing one that counts its overtime, reads the frame clock, so other
   cards cost nothing per frame; display strings are derived from whole seconds and change once a
@@ -21,12 +28,21 @@
   import { settingsStore } from '../../state/settings.svelte'
   import { runTimer, startTimer } from '../../state/timer-actions'
   import { frameClock } from '../frame-clock.svelte'
-  import { Button, Chip } from '../primitives'
+  import { Button, Chip, Icon } from '../primitives'
   import Card from './Card.svelte'
   import Digits from './Digits.svelte'
   import { quickAddLabel, timerReadout, timerView } from './display'
   import EndTimeChip from './EndTimeChip.svelte'
+  import { holdRepeat } from './hold-repeat'
   import Ring from './Ring.svelte'
+  import {
+    canStep,
+    durationFields,
+    stepDelta,
+    stepLabel,
+    type DurationUnit,
+    type StepDirection,
+  } from './stepper'
   import type { CardShellProps } from './types'
 
   interface Props extends CardShellProps {
@@ -102,6 +118,24 @@
   }
 
   const canStart = $derived(view === 'typing' || t.duration > 0)
+
+  /** The fields the steppers stand over: an idle timer's only (not typed digits). */
+  const fields = $derived(view === 'idle' ? durationFields(text) : [])
+
+  /**
+   * A stepper: one unit of a field up or down; the engine carries. A ▼ that would clamp to zero is
+   * disabled, and checked again here against the state it applies to (a hold racing a re-render).
+   */
+  function step(unit: DurationUnit, direction: StepDirection): void {
+    cardStore.timer(card.id, (s, at) =>
+      canStep(s.duration, unit, direction) ? timer.addTime(s, stepDelta(unit, direction), at) : s,
+    )
+  }
+
+  /** A stepper press leaves focus where it was (see above); its click still selects the card. */
+  function keepFocus(event: MouseEvent): void {
+    event.preventDefault()
+  }
 </script>
 
 {#snippet chips(inert: boolean)}
@@ -118,11 +152,54 @@
   </div>
 {/snippet}
 
+<!--
+  A row of steppers: a cell per field, as wide as the field's text in the digits' font (an invisible
+  copy of it), with the button over it, and the colons' room between them, so each button stands
+  over its field. Keyed by unit, so a held button stays when an hours field comes or goes.
+-->
+{#snippet steps(direction: StepDirection)}
+  {#if fields.length > 0}
+    <span class={['steps', direction]}>
+      {#each fields as field, index (field.unit)}
+        {#if index > 0}
+          <span class="ghost" aria-hidden="true">:</span>
+        {/if}
+        <span class="cell">
+          <span class="ghost">{field.text}</span>
+          <button
+            type="button"
+            class="step"
+            tabindex="-1"
+            disabled={!canStep(t.duration, field.unit, direction)}
+            aria-label={stepLabel(field.unit, direction)}
+            title={stepLabel(field.unit, direction)}
+            onmousedown={keepFocus}
+            {@attach holdRepeat(() => {
+              step(field.unit, direction)
+            })}
+          >
+            <Icon name={direction === 'up' ? 'keyboard_arrow_up' : 'keyboard_arrow_down'} />
+          </button>
+        </span>
+      {/each}
+    </span>
+  {/if}
+{/snippet}
+
 <Card {card} phase={t.phase} {...shell}>
   {#snippet face(digitsId: string)}
     {#if view === 'idle' || view === 'typing'}
       <div class="setter">
-        <Digits id={digitsId} {text} tone={view === 'typing' ? 'typing' : 'default'} underline />
+        <div class="time">
+          <Digits id={digitsId} {text} tone={view === 'typing' ? 'typing' : 'default'} underline>
+            {#snippet above()}
+              {@render steps('up')}
+            {/snippet}
+            {#snippet below()}
+              {@render steps('down')}
+            {/snippet}
+          </Digits>
+        </div>
         {@render chips(false)}
       </div>
     {:else}
@@ -181,7 +258,117 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: calc(var(--chip-font) * 1.8);
+    gap: var(--setter-gap);
+    /* Between the rule and the chips: the room for the ▼ steppers. */
+    --setter-gap: calc(var(--chip-font) * 1.8);
+  }
+
+  /*
+   * The steppers' rows hang over and under the digits (and the rule), out of the layout, so the
+   * setter keeps its size and the digits stay put when the timer starts. A row is half a digit
+   * tall, at least 1.75rem, but never taller than the gap to the chips, so big digits (fullscreen)
+   * keep the ▼ row clear of them. Rows are positioned like the chips (whose hit areas, later in
+   * the page, win where a row meets them) and under the header's buttons (z-index 1), which a row
+   * may reach on a short face.
+   */
+  .steps {
+    position: absolute;
+    inset-inline: 0;
+    display: flex;
+    justify-content: center;
+    block-size: min(max(0.5em, 1.75rem), var(--setter-gap));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-short, 150ms) var(--easing-standard, ease);
+  }
+
+  .up {
+    inset-block-end: 100%;
+  }
+
+  .down {
+    inset-block-start: 100%;
+  }
+
+  .time:hover .steps,
+  .time:focus-within .steps {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Touch screens have no hover, and often no keyboard to type digits with. */
+  @media (hover: none) {
+    .steps {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+
+  .cell {
+    position: relative;
+  }
+
+  /* A field's text (or a colon) in the digits' font, only for its width. */
+  .ghost {
+    display: block;
+    block-size: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    visibility: hidden;
+  }
+
+  .step {
+    position: absolute;
+    inset: 0;
+    /* Flex, not grid: an icon wider than a one-digit cell overhangs both sides, centered. */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-small, 8px);
+    background: transparent;
+    color: var(--md-sys-color-on-surface-variant);
+    /* Half a digit, from 1rem (legible on the narrowest card) to 1.5rem; it may overhang a cell. */
+    font-size: clamp(1rem, 0.5em, 1.5rem);
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .step::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-short, 150ms) var(--easing-standard, ease);
+  }
+
+  .step:hover::before {
+    opacity: var(--state-hover, 0.08);
+  }
+
+  .step:focus-visible::before {
+    opacity: var(--state-focus, 0.1);
+  }
+
+  .step:active::before {
+    opacity: var(--state-pressed, 0.1);
+  }
+
+  .step:disabled {
+    color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%, transparent);
+    cursor: default;
+  }
+
+  .step:disabled::before {
+    opacity: 0;
   }
 
   .chips {
@@ -280,9 +467,29 @@
     }
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .steps,
+    .step::before {
+      transition: none;
+    }
+  }
+
   @media (forced-colors: active) {
     .times-up {
       color: CanvasText;
+    }
+
+    .step {
+      border-color: CanvasText;
+    }
+
+    .step::before {
+      display: none;
+    }
+
+    .step:disabled {
+      border-color: GrayText;
+      color: GrayText;
     }
   }
 </style>

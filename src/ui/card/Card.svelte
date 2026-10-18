@@ -43,6 +43,7 @@
     editing,
     renaming,
     inert = false,
+    onrename,
     onrenameend,
     ondelete,
     ondragstart,
@@ -173,6 +174,7 @@
       {renaming}
       {fullscreen}
       ontogglefullscreen={toggleFullscreen}
+      {onrename}
       onrenameend={endRename}
       {ondelete}
       {ondragstart}

@@ -156,6 +156,13 @@ describe('parseExport', () => {
     expect(ok(parseExport(stringifyExport(empty)))).toEqual(empty)
   })
 
+  it('reads a card’s icon back, and cards without one stay without', () => {
+    const withIcon: Card = { ...STOPWATCH, icon: '🏃' }
+    const data = ok(parseExport(fileWith({ cards: [TIMER, withIcon] })))
+    expect(data.cards).toEqual([TIMER, withIcon])
+    expect(data.cards[0]).not.toHaveProperty('icon')
+  })
+
   it('leaves cards as stored; settling them is the importer’s job', () => {
     const data = ok(parseExport(fileWith({})))
     expect(data.cards[0]).toEqual(TIMER)
@@ -258,6 +265,10 @@ describe('parseExport', () => {
       ['a missing name', { ...TIMER, name: undefined }, 'name'],
       ['a creation time that is not a number', { ...TIMER, createdAt: '2026' }, 'createdAt'],
       ['a mute flag that is not a boolean', { ...TIMER, muted: 0 }, 'muted'],
+      ['an icon that is not an emoji', { ...TIMER, icon: 'tea' }, 'icon'],
+      ['an empty icon', { ...TIMER, icon: '' }, 'icon'],
+      ['an icon that is not a string', { ...TIMER, icon: 7 }, 'icon'],
+      ['an icon set to null', { ...TIMER, icon: null }, 'icon'],
       ['a timer without its state', { ...TIMER, timer: undefined }, 'timer'],
       ['a timer with a stopwatch state', { ...TIMER, timer: { phase: 'idle' } }, 'timer.duration'],
       [
@@ -325,6 +336,13 @@ describe('parseExport', () => {
     it.each(brokenCards)('a card with %s', (_, card, path) => {
       const result = parseExport(fileWith({ cards: [TIMER, card] }))
       expect(failure(result)).toEqual({ reason: 'invalid', path: `cards.1.${path}` })
+    })
+
+    it('a first card with an invalid icon, at its path', () => {
+      expect(failure(parseExport(fileWith({ cards: [{ ...TIMER, icon: 'abc' }] })))).toEqual({
+        reason: 'invalid',
+        path: 'cards.0.icon',
+      })
     })
 
     it('a card that is not an object', () => {
@@ -489,10 +507,18 @@ describe('export round trips', () => {
     name,
     createdAt: time,
     muted: fc.boolean(),
+    icon: fc.constantFrom('🍵', '🇹🇼', '1️⃣', '👩‍💻', '👋🏽'),
   }
+  const common = ['id', 'name', 'createdAt', 'muted', 'kind'] as const
   const card: fc.Arbitrary<Card> = fc.oneof(
-    fc.record({ ...base, kind: fc.constant('timer' as const), timer: timerState }),
-    fc.record({ ...base, kind: fc.constant('stopwatch' as const), stopwatch: stopwatchState }),
+    fc.record(
+      { ...base, kind: fc.constant('timer' as const), timer: timerState },
+      { requiredKeys: [...common, 'timer'] },
+    ),
+    fc.record(
+      { ...base, kind: fc.constant('stopwatch' as const), stopwatch: stopwatchState },
+      { requiredKeys: [...common, 'stopwatch'] },
+    ),
   )
   const preset: fc.Arbitrary<ExportPreset> = fc.record({
     id: fc.string({ minLength: 1, maxLength: 40 }),

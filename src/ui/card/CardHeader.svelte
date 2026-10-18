@@ -1,12 +1,17 @@
 <!--
   @component
-  A card's header: type icon and name on the left; mute, fullscreen and the mini-window button on
-  the right (only where there is a mini window: the desktop app, or a browser with Document
+  A card's header: icon and name on the left; mute, fullscreen and the mini-window button on the
+  right (only where there is a mini window: the desktop app, or a browser with Document
   Picture-in-Picture; it opens the card there, or switches the open one to it). In edit mode the
   name becomes a text field (Enter or leaving the field saves, Esc reverts) and a drag handle and
   a delete button appear; the delete goes through `ondelete` (the app may ask first). `renaming`
-  shows the field outside edit mode too (F2) and focuses it. The type icon is decorative: the
-  card's description says its kind.
+  shows the field outside edit mode too (F2) and focuses it. Outside edit mode the name is a
+  button that asks for that (`onrename`, the same path as F2), inside the heading so the heading
+  keeps the card's name.
+
+  The icon is the card's emoji, or its kind's icon when it has none (the card's description says
+  its kind either way). It is a button, "Change icon", that opens the emoji picker; the picker
+  loads with `import()` on first use (src/ui/emoji/), so the startup bundle carries none of it.
 -->
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments'
@@ -15,6 +20,7 @@
   import { m } from '../../i18n'
   import { platform } from '../../platform'
   import { cardStore } from '../../state/cards.svelte'
+  import type EmojiPicker from '../emoji/EmojiPicker.svelte'
   import { openMiniWindow } from '../mini/open'
   import { Icon, IconButton } from '../primitives'
 
@@ -25,6 +31,8 @@
     /** Whether the card is shown fullscreen. */
     fullscreen: boolean
     ontogglefullscreen: () => void
+    /** The name was clicked (outside edit mode): rename the card, as F2 does. */
+    onrename?: (() => void) | undefined
     /** The rename field closed; `refocus` asks the card to take focus back (Enter, Esc). */
     onrenameend: (refocus: boolean) => void
     /** The delete button was pressed; without it the card is deleted at once. */
@@ -39,6 +47,7 @@
     renaming,
     fullscreen,
     ontogglefullscreen,
+    onrename,
     onrenameend,
     ondelete,
     ondragstart,
@@ -46,6 +55,8 @@
   }: Props = $props()
 
   const isTimer = $derived(card.kind === 'timer')
+  const uid = $props.id()
+  const renameHintId = `${uid}-rename-hint`
 
   // The field's text; follows the card's name until the user types, then holds the draft.
   let draft = $derived(card.name)
@@ -93,6 +104,34 @@
     if (unsaved !== null) commit(unsaved)
   }
 
+  // ── Icon ─────────────────────────────────────────────────────────────────────────────────
+  /** The picker component, once loaded; it stays loaded for later openings. */
+  let Picker = $state<typeof EmojiPicker>()
+  let pickerOpen = $state(false)
+  let pickerLoading = false
+
+  /** Opens the emoji picker, loading it the first time. */
+  function openPicker(): void {
+    if (Picker !== undefined) {
+      pickerOpen = true
+      return
+    }
+    if (pickerLoading) return
+    pickerLoading = true
+    import('../emoji/EmojiPicker.svelte').then(
+      (module) => {
+        Picker = module.default
+        pickerOpen = true
+        pickerLoading = false
+      },
+      (error: unknown) => {
+        // Offline before the app was cached, say. The next click loads it again.
+        console.warn('Timer App: could not load the emoji picker', error)
+        pickerLoading = false
+      },
+    )
+  }
+
   const STEP_KEYS: Readonly<Record<string, cards.Direction>> = {
     ArrowLeft: 'left',
     ArrowRight: 'right',
@@ -123,9 +162,20 @@
     </button>
   {/if}
 
-  <span class="type">
-    <Icon name={isTimer ? 'hourglass_top' : 'timer'} />
-  </span>
+  <button
+    type="button"
+    class={['type', { emoji: card.icon !== undefined }]}
+    aria-label={m.card_icon_change()}
+    title={m.card_icon_change()}
+    aria-haspopup="dialog"
+    onclick={openPicker}
+  >
+    {#if card.icon !== undefined}
+      {card.icon}
+    {:else}
+      <Icon name={isTimer ? 'hourglass_top' : 'timer'} />
+    {/if}
+  </button>
 
   {#if editing || renaming}
     <input
@@ -150,7 +200,19 @@
       }}
     />
   {:else}
-    <h2 class="name" title={card.name}>{card.name}</h2>
+    <h2 class="name">
+      <button
+        type="button"
+        class="name-button"
+        title={card.name}
+        aria-describedby={renameHintId}
+        onclick={() => {
+          onrename?.()
+        }}>{card.name}</button
+      >
+    </h2>
+    <!-- Hidden, so only the button's description says it (and not the heading's name). -->
+    <span id={renameHintId} hidden>{m.card_rename_hint()}</span>
   {/if}
 
   <div class="actions">
@@ -191,6 +253,19 @@
   </div>
 </header>
 
+{#if Picker}
+  <Picker
+    bind:open={pickerOpen}
+    current={card.icon}
+    onpick={(emoji: string) => {
+      cardStore.setIcon(card.id, emoji)
+    }}
+    onclear={() => {
+      cardStore.setIcon(card.id, null)
+    }}
+  />
+{/if}
+
 <style>
   .header {
     display: flex;
@@ -204,24 +279,97 @@
     --icon-button-icon-size: clamp(1.25rem, 3.1cqw, 2.25rem);
   }
 
+  /*
+   * The icon: a round button with a 44px hit area, as IconButton has; negative margins keep the
+   * glyph where the plain icon was and the header row as short as the reference's.
+   */
   .type {
-    display: inline-flex;
+    --_hit: max(var(--touch-target, 44px), 1.6em);
+    position: relative;
+    display: inline-grid;
     flex: none;
-    font-size: clamp(1.25rem, 3.1cqw, 2.25rem);
+    place-items: center;
+    inline-size: var(--_hit);
+    block-size: var(--_hit);
+    margin-block: calc((1.3em - var(--_hit)) / 2);
+    margin-inline: calc((1em - var(--_hit)) / 2);
+    padding: 0;
+    /* Transparent until forced-colors mode paints it. */
+    border: 1px solid transparent;
+    border-radius: var(--radius-pill, 999px);
+    background: transparent;
     color: var(--md-sys-color-on-surface);
+    font-size: clamp(1.25rem, 3.1cqw, 2.25rem);
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .type.emoji {
+    font-family: var(--font-emoji);
+  }
+
+  /* M3 state layers: the content color, faintly. */
+  .type::before,
+  .name-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-short, 150ms) var(--easing-standard, ease);
+  }
+
+  .type:hover::before,
+  .name-button:hover::before {
+    opacity: var(--state-hover, 0.08);
+  }
+
+  .type:focus-visible::before,
+  .name-button:focus-visible::before {
+    opacity: var(--state-focus, 0.1);
+  }
+
+  .type:active::before,
+  .name-button:active::before {
+    opacity: var(--state-pressed, 0.1);
   }
 
   .name {
     flex: 1;
     min-inline-size: 0;
     margin: 0;
-    overflow: hidden;
     font-size: inherit;
     font-weight: 500;
     line-height: 1.3;
     letter-spacing: 0.01em;
+  }
+
+  /*
+   * The name as a button: the text as before (ellipsis included), a faint state layer in the
+   * card's shape on hover and focus, and a text cursor, since a click starts the rename. The
+   * inline padding gives the layer room; the negative margin keeps the text in place.
+   */
+  .name-button {
+    position: relative;
+    display: block;
+    max-inline-size: calc(100% + 0.8em);
+    margin-inline: -0.4em;
+    padding-block: 0;
+    padding-inline: 0.4em;
+    overflow: hidden;
+    border: none;
+    border-radius: var(--radius-small, 8px);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: start;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: text;
   }
 
   .name-field {
@@ -297,6 +445,11 @@
   @media (forced-colors: active) {
     .name-field {
       border-color: CanvasText;
+    }
+
+    .type::before,
+    .name-button::before {
+      display: none;
     }
   }
 </style>

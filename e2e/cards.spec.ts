@@ -133,6 +133,25 @@ test('Esc in a rename field reverts the name; F2 works outside edit mode', async
   await expect(selectedCard(page)).toBeFocused()
 })
 
+test('clicking the name opens the rename field', async ({ page }) => {
+  await openApp(page)
+  // On a card that is not selected: the click selects it first, as F2 acts on the selection.
+  await page.keyboard.press('n')
+  await expect(selectedCard(page)).toHaveAccessibleName('Timer 2')
+  await cardNamed(page, 'Timer').getByRole('button', { name: 'Timer', exact: true }).click()
+  const field = page.getByRole('textbox', { name: 'Card name' })
+  await expect(field).toBeFocused()
+  await expect(field).toHaveValue('Timer')
+  await expect(selectedCard(page)).toHaveAccessibleName('Timer')
+  // The name is selected, so typing replaces it.
+  await page.keyboard.type('Tea')
+  await page.keyboard.press('Enter')
+  await expect(field).toHaveCount(0)
+  await expect(cardNamed(page, 'Tea').getByRole('heading', { name: 'Tea' })).toBeVisible()
+  await expect(cardNamed(page, 'Tea')).toBeFocused()
+  await expect.poll(() => cardNames(page)).toEqual(['Tea', 'Timer 2'])
+})
+
 test('P opens the + Timer menu, whose presets add named timers', async ({ page }) => {
   await openApp(page)
   await page.keyboard.press('p')

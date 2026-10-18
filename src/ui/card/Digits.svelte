@@ -7,38 +7,48 @@
   layouts.
 
   `tone="typing"` shows typed digits in the primary color; `underline` adds the editable-duration
-  rule of an idle timer. `id` lets the card point `aria-describedby` at the readout.
+  rule of an idle timer. `id` lets the card point `aria-describedby` at the readout (the text
+  alone, not what `above` and `below` add).
+
+  `above` and `below` draw extra rows over and under the text, such as an idle timer's steppers.
+  They are rendered inside the readout, which is their containing block (position them
+  absolutely, so the readout keeps its size) and gives them its font: text in them lines up with
+  the digits. Without them the readout is the text alone.
 
   ```svelte
   <Digits text="5:00" underline />
   ```
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte'
+
   interface Props {
     text: string
     tone?: 'default' | 'typing'
     /** The 1px rule under an idle timer's duration (a hint that it can be typed over). */
     underline?: boolean
     id?: string | undefined
+    /** A row over the text, positioned against the readout (an idle timer's ▲ steppers). */
+    above?: Snippet | undefined
+    /** A row under the text and its rule, positioned against the readout (the ▼ steppers). */
+    below?: Snippet | undefined
   }
 
-  let { text, tone = 'default', underline = false, id }: Props = $props()
+  let { text, tone = 'default', underline = false, id, above, below }: Props = $props()
 
   // A plain string, derived apart from `text`: the per-frame text update then rebuilds nothing else.
   const classes = $derived(underline ? `digits ${tone} underline` : `digits ${tone}`)
 </script>
 
-<span
-  {id}
-  class={classes}
-  role="timer"
-  aria-live="off"
-  aria-atomic="true"
-  style:--chars={text.length}>{text}</span
+<span class={classes} style:--chars={text.length}
+  >{@render above?.()}<span {id} class="text" role="timer" aria-live="off" aria-atomic="true"
+    >{text}</span
+  >{@render below?.()}</span
 >
 
 <style>
   .digits {
+    position: relative;
     display: block;
     /*
      * 17% of the ring (--digit-ratio), at least 1.5rem, times the size setting; long strings
@@ -67,18 +77,22 @@
     unicode-bidi: isolate;
   }
 
+  .text {
+    display: block;
+  }
+
   .typing {
     color: var(--md-sys-color-primary);
   }
 
-  .underline {
+  .underline .text {
     padding-block-end: 0.22em;
     padding-inline: 0.33em;
     border-block-end: 1px solid var(--md-sys-color-outline-variant);
   }
 
   @media (forced-colors: active) {
-    .underline {
+    .underline .text {
       border-color: CanvasText;
     }
 
