@@ -26,14 +26,14 @@ Design references in [design/](design/):
 - Each card is either a timer or a stopwatch, fixed when it's created. New cards are named "Timer", "Timer 2", … (smallest unused number); the default timer is 5:00.
 - Clicking a card selects it; the selected card has a 2px outline in the primary color.
 - Floating action bar, bottom right: edit (✎), + Timer (a menu: 5:00 and the presets), + Stopwatch. Labels collapse to icons on narrow screens.
-- Edit mode (✎ or `E`): the name becomes a text field, delete and drag handles appear; reorder by drag or `Ctrl+Arrow` (which also works outside edit mode). Cards keep running.
+- Edit mode (✎ or `E`): the name becomes a text field, a delete button appears and the drag handle takes the icon's place; reorder by drag or `Ctrl+Arrow` (which also works outside edit mode). Cards keep running.
 - Delete (`Delete`, any mode) shows a 6-second snackbar with Undo; `Ctrl/Cmd+Z` undoes while it is visible. A restored card is renumbered if its name was taken meanwhile.
 
 ## Card
 
 Visuals follow the Google (Material 3) card, except the Timer/Stopwatch toggle is replaced by the card's type icon (⧗ timer, ◷ stopwatch) and name. Card colors come from the seed's Material palettes: in dark mode the card is secondary tone 20 on a neutral-variant tone 14 page, and chips, tonal buttons and the ring track are secondary tone 27; in light mode the card is white on neutral-variant tone 94, with secondary tone 90 for the tonal parts. Material's `surface-container` roles looked too dark and grey beside the reference card. Hero digits are 17% of the ring diameter.
 
-Header: icon and name, mute, fullscreen, always-on-top mini window (desktop, and Chromium browsers through Document Picture-in-Picture; hidden elsewhere). Clicking the name opens the rename field (the same as `F2`). Clicking the icon opens an emoji picker: a searchable (label and keywords, in the UI language and in English), scrollable grid of every Unicode emoji by category; the chosen emoji replaces the type icon on the card and in the mini window, syncs with the card, and "Use the default icon" puts the type icon back. Skin-tone variants are not offered, and emoji the device's font cannot draw are left out.
+Header: icon and name, mute, fullscreen, always-on-top mini window (desktop, and Chromium browsers through Document Picture-in-Picture; hidden elsewhere). Clicking the name opens the rename field (the same as `F2`). Clicking the icon opens an emoji picker: a searchable (label and keywords, in the UI language and in English), scrollable grid of every Unicode emoji by category; the chosen emoji replaces the type icon on the card and in the mini window, syncs with the card, and "Use the default icon" puts the type icon back. Skin-tone variants are not offered, and emoji the device's font cannot draw are left out. The header is a row of touching 44 px boxes flush with the card's padding edges: the icon button starts where the controls row starts and the right-hand buttons end where it ends, so the icon sits as far from the card's edge as they do. The name's text is inset exactly as the rename field's (the button has the field's box), so it stays put when the field replaces it; in edit mode the drag handle takes the icon's place (the icon is changed outside edit mode).
 
 Fullscreen uses the browser Fullscreen API; where it is unavailable (iOS Safari) the card expands into an overlay. `Esc` leaves either. The fullscreen card follows the selection, so arrow keys switch which card fills the screen.
 
@@ -43,9 +43,9 @@ Mini window: a compact card floating above other apps. Desktop uses a Tauri alwa
 
 | State | Display | Controls |
 |---|---|---|
-| Idle | Set duration (`5:00`) with an underline; hovering it shows ▲ and ▼ over each field (hours, minutes, seconds) that add or subtract one unit, repeating while held (always shown on touch devices, which have no keyboard for digit entry); quick-add chips `+0:30` `+1:00` `+5:00` (very short cards drop `+0:30`, then `+5:00`) | Full-width Start |
-| Running | Remaining time inside the ring; the arc grows clockwise from 12 o'clock with elapsed progress; end-time chip ("🔔 2:47 PM"); chips stay available (stacked beside the ring on short cards) | Pause, Reset |
-| Paused | Remaining time; ring frozen; chips stay available | Resume, Reset |
+| Idle | Set duration, always in the fixed form (`00:05:00`, whatever the time style, so the hour steppers are there; typed digits show as typed), with an underline; hovering it shows ▲ and ▼ over each field (hours, minutes, seconds) that add or subtract one unit, repeating while held (always shown on touch devices, which have no keyboard for digit entry); quick-add chips `+0:30` `+1:00` `+5:00` (very short cards drop `+0:30`, then `+5:00`) | Full-width Start |
+| Running | Remaining time inside the ring with the end-time chip ("🔔 2:47 PM") under it, the two centered as one group; the arc grows clockwise from 12 o'clock with elapsed progress; chips stay available, as far below the ring as above the buttons (stacked beside the ring on short cards) | Pause, Reset |
+| Paused | Remaining time with "Paused" under it (in the end time's row, so the digits stay put); ring frozen; chips stay available | Resume, Reset |
 | Time's up | Ring full; label "Time's up"; overtime counting up (`-0:12`); the ring pulses gently (off with reduced motion) while the label stays steady for contrast; sound loops | Dismiss, Restart |
 
 ### Stopwatch
@@ -64,7 +64,7 @@ Named durations (e.g. "Tea 3:00"). Picking one from the + Timer menu or the comm
 
 ### Time format
 
-- Default: compact, Google style (`4:53`, `1:30:30`). Fixed `HH:MM:SS` (`00:04:53`) is a setting.
+- Default: compact, Google style (`4:53`, `1:30:30`). Fixed `HH:MM:SS` (`00:04:53`) is a setting. An idle timer's duration is always shown fixed (`00:05:00`), so the hour steppers are there; the mini window follows the setting.
 - Countdowns round up: the display reads `0:01` until the exact end and `0:00` the moment the alarm starts. Elapsed time and overtime round down.
 - Under a minute a countdown still shows minutes (`0:05`). The stopwatch shows seconds and centiseconds (`0.00`, `59.99`), then `1:05.43`, then `1:00:05.43`.
 - Digits use tabular figures so they don't shift sideways.
@@ -258,3 +258,5 @@ New questions continue from Q25.
 | 2026-10-18 | Q16 | Apple sign-in deferred: it needs the Apple Developer Program, which the owner is not paying for now. Email codes (Resend), Google and GitHub are live in production; the Apple code path stays and turns on when its secrets exist. |
 | 2026-10-19 | — | Card header: the name is a button that opens the rename field (same as `F2`); the type icon is a button that opens an emoji picker (every Unicode emoji by category, searched by label and keywords in the UI language and in English; base emoji only, no skin-tone variants; emoji the device cannot draw are hidden by a canvas probe per Unicode version). The icon is a `cards.icon` cell, synced and exported (format 1 stays: the field is optional). A 0.1.0 client leaves the cell alone (it writes cells one by one) except where it writes a whole row (undo delete, import), which drops the icon until it updates. The emoji data is generated at build time from `emojibase-data` into lazy per-language chunks that the service worker caches on first use rather than precaching. |
 | 2026-10-19 | — | Idle timer: hovering the time shows ▲/▼ over each field that add or subtract one unit (hold to repeat); always visible on touch devices; not in the tab order. Rows are ghost copies of the fields in the digits font, so they line up without measuring. |
+| 2026-10-19 | — | Card alignment, header: a row of touching 44 px boxes (drag handle or icon, name or its field, actions) flush with the card's padding edges, so the icon sits as far from the edge as the right-hand icons and the controls row starts on the same line; the name button has the rename field's exact box and inset, so the text stays put when renamed; in edit mode the drag handle takes the icon's place. |
+| 2026-10-19 | — | Card alignment, face: the digits and the note under them (end time, "Paused", "Time's up") are centered in the ring as one group, the note row always present at the end-time chip's height so the digits never move between states; the chips sit two face gaps below the ring and two above the buttons (`--face-gap`, a registered property so the face's own container resolves it against the card); labels in chips, buttons and the end-time chip are centered by their ink (`text-box-trim`; line-box centering where unsupported); an idle timer's duration is always in the fixed form (`00:05:00`), so the hour steppers exist; its digits fit the face's width rather than the ring (`--digits-fit`), so they are as big as the running digits (no jump on Start) and the digit size setting keeps its whole range. |

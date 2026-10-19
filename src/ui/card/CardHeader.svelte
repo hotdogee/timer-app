@@ -3,15 +3,17 @@
   A card's header: icon and name on the left; mute, fullscreen and the mini-window button on the
   right (only where there is a mini window: the desktop app, or a browser with Document
   Picture-in-Picture; it opens the card there, or switches the open one to it). In edit mode the
-  name becomes a text field (Enter or leaving the field saves, Esc reverts) and a drag handle and
-  a delete button appear; the delete goes through `ondelete` (the app may ask first). `renaming`
-  shows the field outside edit mode too (F2) and focuses it. Outside edit mode the name is a
-  button that asks for that (`onrename`, the same path as F2), inside the heading so the heading
-  keeps the card's name.
+  name becomes a text field (Enter or leaving the field saves, Esc reverts), a drag handle takes
+  the icon's place and a delete button appears; the delete goes through `ondelete` (the app may
+  ask first). `renaming` shows the field outside edit mode too (F2) and focuses it, and the icon
+  stays. Outside edit mode the name is a button that asks for that (`onrename`, the same path as
+  F2), inside the heading so the heading keeps the card's name. The name's text sits where the
+  field's text does, so it does not move when the field replaces it.
 
   The icon is the card's emoji, or its kind's icon when it has none (the card's description says
-  its kind either way). It is a button, "Change icon", that opens the emoji picker; the picker
-  loads with `import()` on first use (src/ui/emoji/), so the startup bundle carries none of it.
+  its kind either way). It is a button, "Change icon", that opens the emoji picker (outside edit
+  mode, where the handle has its place); the picker loads with `import()` on first use
+  (src/ui/emoji/), so the startup bundle carries none of it.
 -->
 <script lang="ts">
   import type { Attachment } from 'svelte/attachments'
@@ -148,7 +150,7 @@
   }
 </script>
 
-<header class={['header', { editing: editing || renaming }]}>
+<header class="header">
   {#if editing}
     <button
       type="button"
@@ -160,22 +162,22 @@
     >
       <Icon name="drag_indicator" />
     </button>
+  {:else}
+    <button
+      type="button"
+      class={['type', { emoji: card.icon !== undefined }]}
+      aria-label={m.card_icon_change()}
+      title={m.card_icon_change()}
+      aria-haspopup="dialog"
+      onclick={openPicker}
+    >
+      {#if card.icon !== undefined}
+        {card.icon}
+      {:else}
+        <Icon name={isTimer ? 'hourglass_top' : 'timer'} />
+      {/if}
+    </button>
   {/if}
-
-  <button
-    type="button"
-    class={['type', { emoji: card.icon !== undefined }]}
-    aria-label={m.card_icon_change()}
-    title={m.card_icon_change()}
-    aria-haspopup="dialog"
-    onclick={openPicker}
-  >
-    {#if card.icon !== undefined}
-      {card.icon}
-    {:else}
-      <Icon name={isTimer ? 'hourglass_top' : 'timer'} />
-    {/if}
-  </button>
 
   {#if editing || renaming}
     <input
@@ -208,7 +210,7 @@
         aria-describedby={renameHintId}
         onclick={() => {
           onrename?.()
-        }}>{card.name}</button
+        }}><span class="name-text">{card.name}</span></button
       >
     </h2>
     <!-- Hidden, so only the button's description says it (and not the heading's name). -->
@@ -267,10 +269,15 @@
 {/if}
 
 <style>
+  /*
+   * A row of touching 44px boxes: the icon (or the handle), the name (or its field), the actions.
+   * The boxes' own inner room, with the name's inset, keeps the text and the field's border clear
+   * of the glyphs, the same on both sides of the field.
+   */
   .header {
     display: flex;
     align-items: center;
-    gap: var(--space-2, 0.5rem);
+    gap: 0;
     min-block-size: clamp(2.25rem, 5.5cqw, 4rem);
     font-size: clamp(0.875rem, 2.3cqw, 1.75rem);
     /* Header icons are primary, as in the reference card. */
@@ -280,26 +287,26 @@
   }
 
   /*
-   * The icon: a round button with a 44px hit area, as IconButton has; negative margins keep the
-   * glyph where the plain icon was and the header row as short as the reference's.
+   * The icon: a round button with IconButton's box. Its left edge sits on the card's padding edge
+   * as the last header button's right edge does, so its glyph is as far from the card's edge as
+   * theirs are from it, and the controls row below starts on the same edge. The block margins
+   * keep the header row as short as the reference's (as .actions).
    */
   .type {
-    --_hit: max(var(--touch-target, 44px), 1.6em);
     position: relative;
     display: inline-grid;
     flex: none;
     place-items: center;
-    inline-size: var(--_hit);
-    block-size: var(--_hit);
-    margin-block: calc((1.3em - var(--_hit)) / 2);
-    margin-inline: calc((1em - var(--_hit)) / 2);
+    inline-size: max(var(--touch-target, 44px), var(--icon-button-size, 2.75rem));
+    block-size: max(var(--touch-target, 44px), var(--icon-button-size, 2.75rem));
+    margin-block: -0.25rem;
     padding: 0;
     /* Transparent until forced-colors mode paints it. */
     border: 1px solid transparent;
     border-radius: var(--radius-pill, 999px);
     background: transparent;
     color: var(--md-sys-color-on-surface);
-    font-size: clamp(1.25rem, 3.1cqw, 2.25rem);
+    font-size: var(--icon-button-icon-size);
     line-height: 1;
     cursor: pointer;
     touch-action: manipulation;
@@ -309,12 +316,15 @@
     font-family: var(--font-emoji);
   }
 
-  /* M3 state layers: the content color, faintly. */
+  /*
+   * M3 state layers: the content color, faintly. Over the border too, as IconButton's: the icon's
+   * layer is as big as the right-hand buttons', and the name's covers the field's whole box.
+   */
   .type::before,
   .name-button::before {
     content: '';
     position: absolute;
-    inset: 0;
+    inset: -1px;
     border-radius: inherit;
     background: currentColor;
     opacity: 0;
@@ -348,28 +358,38 @@
   }
 
   /*
-   * The name as a button: the text as before (ellipsis included), a faint state layer in the
-   * card's shape on hover and focus, and a text cursor, since a click starts the rename. The
-   * inline padding gives the layer room; the negative margin keeps the text in place.
+   * The name as a button with the rename field's box (height, border, inline padding), so its
+   * text is where the field's text will be: a click (or F2) swaps the field in without moving
+   * the name. The button hugs the text, up to the heading's width; its state layer, in the
+   * field's shape, shows on hover and focus what a click opens, and the text cursor says the
+   * same. The text is in .name-text, since a flex box cannot ellipsize its own text.
    */
   .name-button {
     position: relative;
-    display: block;
-    max-inline-size: calc(100% + 0.8em);
-    margin-inline: -0.4em;
+    display: inline-flex;
+    align-items: center;
+    max-inline-size: 100%;
+    block-size: max(var(--touch-target, 44px), 2.2em);
+    margin-block: -0.25rem;
     padding-block: 0;
-    padding-inline: 0.4em;
-    overflow: hidden;
-    border: none;
+    padding-inline: 0.6em;
+    /* The heading's line is then this box, not set by baselines, so it centers as the field. */
+    vertical-align: top;
+    border: 1px solid transparent;
     border-radius: var(--radius-small, 8px);
     background: transparent;
     color: inherit;
     font: inherit;
     letter-spacing: inherit;
     text-align: start;
+    cursor: text;
+  }
+
+  .name-text {
+    min-inline-size: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    cursor: text;
   }
 
   .name-field {
@@ -386,6 +406,8 @@
     color: var(--md-sys-color-on-surface);
     font-size: inherit;
     font-weight: 500;
+    /* The heading's (.name); the field is not inside it, so it would get the header's normal. */
+    letter-spacing: 0.01em;
   }
 
   .name-field:focus-visible {
@@ -409,20 +431,21 @@
     --icon-button-color: var(--md-sys-color-error);
   }
 
+  /* In the icon's place, in the icon's box: the name field starts where the name does. */
   .handle {
     display: inline-grid;
     flex: none;
     place-items: center;
-    inline-size: var(--touch-target, 44px);
-    block-size: var(--touch-target, 44px);
+    inline-size: max(var(--touch-target, 44px), var(--icon-button-size, 2.75rem));
+    block-size: max(var(--touch-target, 44px), var(--icon-button-size, 2.75rem));
     margin-block: -0.25rem;
-    margin-inline-start: -0.5rem;
     padding: 0;
     border: 1px solid transparent;
     border-radius: var(--radius-pill, 999px);
     background: transparent;
     color: var(--md-sys-color-on-surface-variant);
-    font-size: clamp(1.25rem, 3.1cqw, 2.25rem);
+    font-size: var(--icon-button-icon-size);
+    line-height: 1;
     cursor: grab;
     touch-action: none;
   }
@@ -433,13 +456,6 @@
 
   .handle:active {
     cursor: grabbing;
-  }
-
-  /* A narrow card in edit mode: the name field needs the type icon's room. */
-  @container card (max-width: 20rem) {
-    .editing .type {
-      display: none;
-    }
   }
 
   @media (forced-colors: active) {

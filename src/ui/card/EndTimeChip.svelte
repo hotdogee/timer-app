@@ -29,7 +29,7 @@
 
 <span class="end-time" data-testid="end-time">
   <Icon name="notifications" />
-  <span><span class="visually-hidden">{m.card_ends_at()}&nbsp;</span>{time}</span>
+  <span class="time"><span class="visually-hidden">{m.card_ends_at()}&nbsp;</span>{time}</span>
 </span>
 
 <style>
@@ -37,7 +37,12 @@
     display: inline-flex;
     align-items: center;
     gap: 0.35em;
-    padding-block: 0.3em;
+    /*
+     * A 1.2 line and 0.3em over and under it, as a fixed height so the trimmed text cannot shrink
+     * the pill. TimerCard's .note is as tall: keep the two in step.
+     */
+    block-size: 1.8em;
+    padding-block: 0;
     padding-inline: 0.6em 0.75em;
     border-radius: var(--radius-pill, 999px);
     background: var(--card-tonal, var(--md-sys-color-surface-container-highest));
@@ -47,6 +52,12 @@
     line-height: 1.2;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Trimmed to the cap height and baseline: centered by its ink, not the font's uneven line box. */
+  .time {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
   }
 
   @media (forced-colors: active) {

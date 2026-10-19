@@ -146,7 +146,8 @@ test('font, density and digit size change the cards', async ({ page }) => {
   expect(await computed(digits, 'font-family')).toMatch(/^"?Inter/)
   await expect(page.locator('html')).toHaveAttribute('data-density', 'compact')
   expect(parseFloat(await computed(row, 'column-gap'))).toBeLessThan(comfortableGap)
-  // The digits scale with the setting: 0.75 to 1.5 is twice the size, in the same layout.
+  // The digits scale with the setting: 0.75 to 1.5 is twice the size, in the same layout (an idle
+  // card: its fixed form fits the face, not the ring, so the whole range shows there too).
   await openSettings(page)
   await digitScale.focus()
   await page.keyboard.press('Home')
@@ -158,9 +159,14 @@ test('font, density and digit size change the cards', async ({ page }) => {
 })
 
 test('fixed time style and quick-add values change the timer card', async ({ page }) => {
-  await openApp(page)
+  // On a paused timer: an idle one shows the fixed form whatever the style.
+  await openWithPausedClock(page)
   const card = selectedCard(page)
-  await expect(digitsOf(card)).toHaveText('5:00')
+  await page.keyboard.press('Enter')
+  await page.clock.runFor(10_000)
+  await page.keyboard.press('Space')
+  await expect(card).toHaveAttribute('data-phase', 'paused')
+  await expect(digitsOf(card)).toHaveText('4:50')
   await expect(card.getByRole('button', { name: '+0:30' })).toBeVisible()
 
   const dialog = await openSettings(page, 'Behavior')
@@ -180,11 +186,11 @@ test('fixed time style and quick-add values change the timer card', async ({ pag
   await expect(dialog.getByRole('textbox', { name: 'Chip 2' })).toBeFocused()
   await closeSettings(page)
 
-  await expect(digitsOf(card)).toHaveText('00:05:00')
+  await expect(digitsOf(card)).toHaveText('00:04:50')
   await expect(card.getByRole('button', { name: '+0:15' })).toBeVisible()
   await expect(card.getByRole('button', { name: '+0:30' })).toHaveCount(0)
   await card.getByRole('button', { name: '+0:15' }).click()
-  await expect(digitsOf(card)).toHaveText('00:05:15')
+  await expect(digitsOf(card)).toHaveText('00:05:05')
 })
 
 test.describe('clock format', () => {
@@ -355,10 +361,14 @@ test('settings survive a reload', async ({ page }) => {
   await reloadApp(page)
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
   expect(await pageLuminance(page)).toBeLessThan(0.1)
-  await expect(digitsOf(selectedCard(page))).toHaveText('00:05:00')
   await openSettings(page, 'Appearance')
   await expect(
     dialog.getByRole('radiogroup', { name: 'Theme' }).getByRole('radio', { name: 'Dark' }),
+  ).toBeChecked()
+  // The card's idle digits are fixed whatever the style, so the setting itself is checked.
+  await dialog.getByRole('tab', { name: 'Behavior' }).click()
+  await expect(
+    dialog.getByRole('radiogroup', { name: 'Time format' }).getByRole('radio', { name: 'Fixed' }),
   ).toBeChecked()
 })
 

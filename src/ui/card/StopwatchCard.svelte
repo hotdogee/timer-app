@@ -104,4 +104,13 @@
     display: grid;
     place-items: center;
   }
+
+  /*
+   * Centered by their ink, as a running timer's (TimerCard): trimmed to the cap height and the
+   * baseline, not the line box with the font's unequal ascent and descent.
+   */
+  .readout :global(.text) {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+  }
 </style>

@@ -165,10 +165,17 @@
     font-size: var(--button-icon-size, 1.25em);
   }
 
+  /*
+   * Trimmed to the cap height and baseline: centered by its ink, not the font's uneven line box.
+   * The padding keeps what the trim leaves outside the box (descenders, accents) inside the clip.
+   */
   .label {
     overflow: hidden;
+    padding-block: 0.25em;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
   }
 
   @media (forced-colors: active) {

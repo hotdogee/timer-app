@@ -1,8 +1,8 @@
 /**
  * Pure helpers for the steppers over an idle timer's time (TimerCard): the ▲ and ▼ buttons above
  * and below each field of the readout. The fields come from the readout's own text, so the buttons
- * follow whatever the time style shows (`5:00` has minutes and seconds; `1:30:30` and the fixed
- * style's `00:04:53` add hours), and a press adds or takes away one unit of its field from the
+ * follow whatever it shows (`5:00` has minutes and seconds; `1:30:30` and the fixed form's
+ * `00:04:53`, which an idle TimerCard always shows, add hours), and a press adds or takes away one unit of its field from the
  * whole duration (the engine carries, so `1:00` less a second is `0:59`). A ▼ with less than its
  * unit left is disabled rather than clamping the duration to zero. Kept out of the component so
  * they are unit-tested.

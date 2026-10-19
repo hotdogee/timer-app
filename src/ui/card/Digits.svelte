@@ -3,8 +3,9 @@
   The card's big time readout (`role="timer"`, never announced on its own: state changes go through
   the app's live region). Sized from the face's `--dial` length: 17% of the ring, times the digit
   size setting (`--digit-scale`), shrunk for long strings so `1:00:05.43` still fits inside the
-  ring; drawn at the digit weight setting (`--digit-weight`). Digits stay left-to-right in RTL
-  layouts.
+  ring, or inside `--digits-fit` where a face sets it (an idle timer has no ring, so its fixed
+  `00:05:00` fits the face instead); drawn at the digit weight setting (`--digit-weight`). Digits
+  stay left-to-right in RTL layouts.
 
   `tone="typing"` shows typed digits in the primary color; `underline` adds the editable-duration
   rule of an idle timer. `id` lets the card point `aria-describedby` at the readout (the text
@@ -52,13 +53,13 @@
     display: block;
     /*
      * 17% of the ring (--digit-ratio), at least 1.5rem, times the size setting; long strings
-     * shrink to fit the ring whatever the setting.
+     * shrink to fit the ring (or the width a face names in --digits-fit) whatever the setting.
      */
     font-size: min(
       calc(
         max(1.5rem, calc(var(--dial, 12rem) * var(--digit-ratio, 0.17))) * var(--digit-scale, 1)
       ),
-      calc(var(--dial, 12rem) * 1.3 / var(--chars, 4))
+      calc(var(--digits-fit, var(--dial, 12rem)) * 1.3 / var(--chars, 4))
     );
     font-family: var(--font-digits);
     font-weight: var(--digit-weight, 400);

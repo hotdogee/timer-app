@@ -134,7 +134,7 @@ test('a card describes its kind, state and time to screen readers', async ({ pag
   await openWithPausedClock(page)
   const card = selectedCard(page)
   await expect(card).toHaveAccessibleName('Timer')
-  await expect(card).toHaveAccessibleDescription('Timer, ready 5:00')
+  await expect(card).toHaveAccessibleDescription('Timer, ready 00:05:00')
   await page.keyboard.press('Enter')
   await expect(card).toHaveAccessibleDescription('Timer, running 5:00')
 })

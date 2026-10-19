@@ -79,3 +79,15 @@
   --grid-gap: var(--space-2);
   --card-min: 18rem;
 }
+
+/*
+ * The gap between a card's header, face and controls (Card.svelte sets it, in cqw of the card).
+ * Registered so it computes where it is set and inherits as a length: unregistered, it would be
+ * resolved where it is used, and the face, itself a size container, would turn the cqw into its
+ * own width for the ring and chips inside it.
+ */
+@property --face-gap {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}

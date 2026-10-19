@@ -4,13 +4,16 @@
   full-width Start; hovering the duration shows ▲ and ▼ steppers over and under each of its fields
   (always shown on touch screens), which add or take away an hour, a minute or a second, again and
   again while held (a ▼ with less than its unit left is disabled). Running: the ring fills
-  clockwise around the time left, with the end time below it; Pause and Reset. Paused: frozen;
-  Resume and Reset. Time's up: full ring (pulsing), overtime and "Time's up"; Dismiss and Restart.
-  Typed digits (`typed`, only on the selected card) show in the primary color; Start and the chips
-  apply them first, as the keyboard does, and Reset discards them.
+  clockwise around the time left and the end time, centered as one group; Pause and Reset.
+  Paused: frozen, "Paused" under the time; Resume and Reset. Time's up: full ring (pulsing),
+  overtime and "Time's up" under it; Dismiss and Restart. Typed digits (`typed`, only on the
+  selected card) show in the primary color; Start and the chips apply them first, as the keyboard
+  does, and Reset discards them.
 
   Settings: the time style (compact or fixed), the overtime counter (off: a ringing timer stays at
-  `0:00`) and the three quick-add amounts.
+  `0:00`) and the three quick-add amounts. An idle timer shows the fixed form (`00:05:00`)
+  whatever the time style, so a stepper stands over the hours too; typed digits still show as
+  typed, and a running, paused or ringing timer follows the setting.
 
   The steppers are for the pointer: out of the tab order (the keyboard types digits instead), and a
   press leaves focus where it was, so Space and Enter go on starting the timer rather than pressing
@@ -22,7 +25,7 @@
   second. The settings are read in their own deriveds, outside that per-frame path.
 -->
 <script lang="ts">
-  import { cards, digits, timer, type DigitBuffer, type Ms } from '../../core'
+  import { cards, digits, timer, type DigitBuffer, type Ms, type TimeStyle } from '../../core'
   import { m } from '../../i18n'
   import { cardStore } from '../../state/cards.svelte'
   import { settingsStore } from '../../state/settings.svelte'
@@ -66,6 +69,8 @@
 
   const t = $derived(card.timer)
   const view = $derived(timerView(t, typed))
+  /** Idle is always fixed, so the hours have their field and steppers (see above). */
+  const style: TimeStyle = $derived(view === 'idle' ? 'fixed' : timeStyle)
   /** Whether the display changes over time: running, or ringing with the overtime counter. */
   const live = $derived(timer.needsFrames(t) && (t.phase !== 'ringing' || showOvertime))
   const now = $derived(live ? frameClock.now : 0)
@@ -73,7 +78,7 @@
   const overtimeSeconds = $derived(Math.floor(timer.overtime(t, now) / 1000))
   const text = $derived(
     timerReadout(view, typed, remainingSeconds * 1000, overtimeSeconds * 1000, {
-      style: timeStyle,
+      style,
       showOvertime,
     }),
   )
@@ -208,11 +213,16 @@
           <Ring {progress} pulse={view === 'ringing'} />
           <div class="readout">
             <Digits id={digitsId} {text} />
-            {#if endsAt !== null}
-              <span class="note"><EndTimeChip at={endsAt} /></span>
-            {:else if view === 'ringing'}
-              <span class="note times-up">{m.card_times_up()}</span>
-            {/if}
+            <!-- Always rendered (see .note), so the digits hold still as the note changes. -->
+            <span class={['note', { 'times-up': view === 'ringing', paused: view === 'paused' }]}>
+              {#if endsAt !== null}
+                <EndTimeChip at={endsAt} />
+              {:else if view === 'ringing'}
+                {m.card_times_up()}
+              {:else}
+                {m.card_paused()}
+              {/if}
+            </span>
           </div>
         </div>
       </div>
@@ -261,6 +271,11 @@
     gap: var(--setter-gap);
     /* Between the rule and the chips: the room for the ▼ steppers. */
     --setter-gap: calc(var(--chip-font) * 1.8);
+    /*
+     * No ring here: the fixed form (00:05:00) fits the face's width, so the digits keep the
+     * running face's size (no jump on Start) and the size setting its whole range.
+     */
+    --digits-fit: 100cqw;
   }
 
   /*
@@ -396,37 +411,64 @@
     place-items: center;
   }
 
-  /* The chips sit in the middle of their band, as far from the ring as from the buttons. */
+  /*
+   * The chips sit at the foot of their band (--below: a chip and three face gaps, Card), two face
+   * gaps under a ring that takes the band's full height, and one gap over the face's edge, which
+   * the face's margin makes two from the buttons: as far from the ring as from the buttons.
+   */
   .dial-area + .chips {
     block-size: var(--below);
-    align-content: center;
-    align-items: center;
+    align-content: end;
+    align-items: end;
+    padding-block-end: var(--face-gap);
   }
 
-  /* Digits sit exactly at the ring's center; the note hangs below them. */
+  /* The digits and the note under them, centered in the ring as one group. */
   .readout {
     position: absolute;
     inset: 0;
     display: grid;
-    grid-template-rows: 1fr auto 1fr;
+    align-content: center;
     justify-items: center;
   }
 
-  .readout > :global(.digits) {
-    grid-row: 2;
+  /*
+   * Centered by their ink: the line box carries the font's unequal ascent and descent, so a
+   * centered line box puts the digits a little off center (more with some system fonts); trimmed
+   * to the cap height and the baseline, the glyphs themselves are centered. Browsers without
+   * text-box-trim keep the line box. Not on the idle face's digits: its steppers and rule are laid
+   * out against the line box.
+   */
+  .readout :global(.text) {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
   }
 
+  /*
+   * At least the end-time chip's height (its font size × 1.8, EndTimeChip: keep the two in step),
+   * so the digits stay put when the note changes between the end time, "Paused" and "Time's up".
+   */
   .note {
-    grid-row: 3;
-    align-self: start;
+    display: grid;
+    place-items: center;
+    min-block-size: calc(1.8 * clamp(0.6875rem, var(--dial) * 0.052, 2rem));
     margin-block-start: calc(var(--dial) * 0.03);
+  }
+
+  .times-up,
+  .paused {
+    font-size: clamp(0.75rem, calc(var(--dial) * 0.06), 2.25rem);
+    font-weight: 500;
+    line-height: 1.2;
   }
 
   /* Steady, so the small text keeps its contrast; the ring pulses instead (Ring). */
   .times-up {
     color: var(--md-sys-color-primary);
-    font-size: clamp(0.75rem, calc(var(--dial) * 0.06), 2.25rem);
-    font-weight: 500;
+  }
+
+  .paused {
+    color: var(--md-sys-color-on-surface-variant);
   }
 
   /*
@@ -440,8 +482,10 @@
       inset-block: 0;
       inset-inline-end: 0;
       block-size: auto;
+      padding-block-end: 0;
       flex-direction: column;
       flex-wrap: nowrap;
+      align-items: center;
       justify-content: center;
       gap: max(
         calc(var(--chip-font) * 0.5),
@@ -475,7 +519,8 @@
   }
 
   @media (forced-colors: active) {
-    .times-up {
+    .times-up,
+    .paused {
       color: CanvasText;
     }
 

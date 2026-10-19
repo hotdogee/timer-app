@@ -104,6 +104,12 @@
     font-size: 1.25em;
   }
 
+  /* Trimmed to the cap height and baseline: centered by its ink, not the font's uneven line box. */
+  .label {
+    text-box-trim: trim-both;
+    text-box-edge: cap alphabetic;
+  }
+
   @media (forced-colors: active) {
     .chip::before {
       display: none;

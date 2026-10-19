@@ -23,7 +23,7 @@ test('N and Shift+N add cards, arrows select, Delete removes with undo, Mod+Z re
   await page.keyboard.press('n')
   await expect(cardCells(page)).toHaveCount(2)
   await expect(selectedCard(page)).toHaveAccessibleName('Timer 2')
-  await expect(digitsOf(selectedCard(page))).toHaveText('5:00')
+  await expect(digitsOf(selectedCard(page))).toHaveText('00:05:00')
   await expect(announcer(page)).toHaveText('Added Timer 2')
 
   await page.keyboard.press('Shift+N')
@@ -181,7 +181,7 @@ test('P opens the + Timer menu, whose presets add named timers', async ({ page }
   await page.keyboard.press('Enter')
   await expect(menu).toBeHidden()
   await expect(selectedCard(page)).toHaveAccessibleName('Tea')
-  await expect(digitsOf(selectedCard(page))).toHaveText('3:00')
+  await expect(digitsOf(selectedCard(page))).toHaveText('00:03:00')
   await expect(selectedCard(page)).toHaveAttribute('data-phase', 'idle')
 })
 
@@ -194,7 +194,7 @@ test('clicking a card selects it, and its buttons act on it', async ({ page }) =
   await timerCard.getByRole('timer').click()
   await expect(timerCard).toHaveAttribute('aria-selected', 'true')
   await timerCard.getByRole('button', { name: '+1:00' }).click()
-  await expect(digitsOf(timerCard)).toHaveText('6:00')
+  await expect(digitsOf(timerCard)).toHaveText('00:06:00')
 
   // Space on a focused button presses that button only; it does not also toggle the timer.
   await timerCard.getByRole('button', { name: 'Start' }).focus()

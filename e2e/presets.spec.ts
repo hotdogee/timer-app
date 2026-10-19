@@ -76,14 +76,14 @@ test('a preset added in settings creates timers from the menu and the palette', 
   ])
   await items.last().click()
   await expect(selectedCard(page)).toHaveAccessibleName('Soup')
-  await expect(digitsOf(selectedCard(page))).toHaveText('12:30')
+  await expect(digitsOf(selectedCard(page))).toHaveText('00:12:30')
 
   const options = await paletteOptions(page, 'soup')
   await expect(options.first()).toContainText('New timer: Soup')
   await expect(options.first()).toContainText('12:30')
   await page.keyboard.press('Enter')
   await expect(selectedCard(page)).toHaveAccessibleName('Soup 2')
-  await expect(digitsOf(selectedCard(page))).toHaveText('12:30')
+  await expect(digitsOf(selectedCard(page))).toHaveText('00:12:30')
 })
 
 test('moving and deleting presets changes the menu, and presets survive a reload', async ({

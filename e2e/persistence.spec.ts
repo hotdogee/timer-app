@@ -107,7 +107,7 @@ test('a timer that ends while the page is closed is ringing when it opens', asyn
   await expect(digitsOf(ringing)).toHaveText('−1:00')
   await reopened.keyboard.press('Enter')
   await expect(ringing).toHaveAttribute('data-phase', 'idle')
-  await expect(digitsOf(ringing)).toHaveText('1:00')
+  await expect(digitsOf(ringing)).toHaveText('00:01:00')
 })
 
 test('deleting every card and reloading shows the empty state, not a new card', async ({

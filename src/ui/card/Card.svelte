@@ -232,12 +232,16 @@
     --button-height: clamp(2.75rem, 6.75cqw, 5rem);
     --button-icon-size: clamp(1.125rem, 2.8cqw, 2.25rem);
     --button-font-size: clamp(0.875rem, 2.15cqw, 1.5rem);
+    /* Between header, face and controls; registered (tokens.css), so it resolves here, per card. */
+    --face-gap: clamp(0.25rem, 1.2cqw, 1.25rem);
   }
 
   /*
    * The face is a size container, so the ring and digits fit whatever room the header and controls
    * leave (a phone card, a 4K card, fullscreen). On the stage inside it, --dial is the ring's
    * diameter: the face's height less a band for the quick-add chips (--below), capped by its width.
+   * The band is a chip and three face gaps: the chips sit two gaps under the ring and one over the
+   * face's edge, which the face's margin makes two from the buttons (TimerCard).
    * Timers and stopwatches share it, so their rings are the same size side by side; a stopwatch has
    * no chips and centers its ring in the whole face, half a band lower than a running timer's.
    * Descendants resolve these lengths against the face.
@@ -245,7 +249,7 @@
   .face {
     flex: 1 1 0;
     min-block-size: 0;
-    margin-block: clamp(0.25rem, 1.2cqw, 1.25rem);
+    margin-block: var(--face-gap);
     container: face / size;
   }
 
@@ -253,7 +257,7 @@
     position: relative;
     block-size: 100%;
     --chip-font: clamp(0.75rem, 4.4cqh, 1.375rem);
-    --below: calc(var(--chip-font) * 2.4 + 4cqh);
+    --below: calc(var(--chip-font) * 2.4 + 3 * var(--face-gap));
     --dial: max(0px, min(100cqw, 100cqh - var(--below)));
   }
 

@@ -90,7 +90,9 @@ test('the mini window page shows one card, drives it, and the app follows throug
   await expect(digitsOf(compact)).toHaveText('5:00')
 
   await compact.getByRole('button', { name: '+1:00' }).click()
-  await expect(digitsOf(card)).toHaveText('6:00')
+  // The app's idle card shows the fixed form; the mini window keeps the time style.
+  await expect(digitsOf(card)).toHaveText('00:06:00')
+  await expect(digitsOf(compact)).toHaveText('6:00')
 })
 
 test('the mini window page says when its card is deleted, and follows an undo', async ({
