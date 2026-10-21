@@ -8,11 +8,20 @@ breaks of release notes as they are).
 
 ## Unreleased
 
+## v0.2.0 - 2026-10-21
+
 **Card icons, click to rename, duration steppers.** Click a card's name to rename it. Click its icon to pick an emoji from a searchable, scrollable list of every emoji by category (in the app's language and in English); the emoji shows on the card and in the mini window and syncs with the card. Hover an idle timer's time to get ▲ and ▼ buttons over the hours, minutes and seconds (hold to repeat); on phones and tablets they are always shown.
 
 **Tidier cards.** The header's icon sits as far from the card's edge as the buttons on the right, the name no longer shifts when you rename it, and in edit mode the drag handle takes the icon's place. While running, the time and its end-time chip are centered together in the ring, a paused timer says "Paused" under the time, and the quick-add chips sit as far from the ring as from the buttons. Chip and button labels are centered to the pixel. An idle timer always shows `00:05:00`, so the hour ▲ and ▼ buttons are there too.
 
 **Privacy policy page.** The privacy policy is now a page of the app's own site, https://timer.hanlin.uk/privacy, with the operator and the contact address filled in; Settings › About, Settings › Account and the device approval page link it (the desktop app opens it in the browser), and the web app keeps it for offline reading. On the web, a line under the cards says what the app is and links the policy too. The winget package's privacy link is the same page.
+
+### Commits
+
+- Align the card: symmetric header, centered ring readout, even chip gaps (40790d6)
+- Card icons, click to rename, steppers over an idle timer's time (7d9c6a7)
+- Publish the privacy policy at /privacy and link it from the home page (1917cd7)
+- Docs: v0.1.0 is released; point Install at GitHub Releases (c3bda84)
 
 ## v0.1.0 - 2026-10-18
 
